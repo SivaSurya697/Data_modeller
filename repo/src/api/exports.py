@@ -46,6 +46,7 @@ def index():
                 session.execute(
                     select(Domain)
                     .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                    .options(joinedload(Domain.models))
                     .where(Domain.id == payload.domain_id)
                 )
                 .unique()

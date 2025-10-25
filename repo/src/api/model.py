@@ -37,6 +37,8 @@ def draft_review():
             with get_db() as session:
                 result = service.generate_draft(session, payload)
                 draft = {
+                    "model": result.model,
+                    "version": result.version,
                     "entities": result.entities,
                     "impact": result.impact,
                 }

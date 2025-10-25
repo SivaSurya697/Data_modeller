@@ -19,6 +19,18 @@
 
 {% if draft %}
 <section>
+    <h3>Draft Metadata</h3>
+    <p><strong>Version:</strong> v{{ draft.version }}</p>
+    <p><strong>Name:</strong> {{ draft.model.name }}</p>
+    <p><strong>Summary:</strong> {{ draft.model.summary }}</p>
+    {% if draft.model.instructions %}
+        <details>
+            <summary>Additional instructions</summary>
+            <pre>{{ draft.model.instructions }}</pre>
+        </details>
+    {% endif %}
+</section>
+<section>
     <h3>Draft Entities</h3>
     {% if draft.entities %}
         {% for entity in draft.entities %}

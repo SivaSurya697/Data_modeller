@@ -34,10 +34,15 @@ def export_dictionary(domain: Domain, output_dir: Path) -> Path:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"{slugify(domain.name)}-dictionary.md"
+    latest_version = max((model.version for model in domain.models), default=None)
     content: list[str] = [
         f"# {domain.name} Data Dictionary\n",
         f"Domain description: {domain.description}\n\n",
     ]
+    if latest_version is not None:
+        content.append(f"Latest model version: v{latest_version}\n\n")
+    else:
+        content.append("Latest model version: unavailable\n\n")
     entities = sorted(domain.entities, key=lambda item: item.name.lower())
     if entities:
         content.append("## Entities\n\n")

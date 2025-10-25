@@ -20,10 +20,13 @@ def export_plantuml(domain: Domain, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"{slugify(domain.name)}.puml"
 
+    latest_version = max((model.version for model in domain.models), default=None)
+    title = domain.name if latest_version is None else f"{domain.name} (v{latest_version})"
+
     lines: list[str] = [
         "@startuml",
         "skinparam classAttributeIconSize 0",
-        f"title {domain.name}",
+        f"title {title}",
     ]
 
     entities = sorted(domain.entities, key=lambda item: item.name.lower())
