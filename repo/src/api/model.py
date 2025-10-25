@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from pathlib import Path
+
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -10,9 +12,11 @@ from src.models.db import get_db
 from src.models.tables import Attribute, Domain, Entity, Relationship
 from src.services.llm_modeler import DraftResult, ModelingService
 from src.services.model_analysis import classify_entity, extract_relationship_cardinality
+from src.services.publish import PublishBlocked, PublishService
 from src.services.validators import DraftRequest
 
 bp = Blueprint("modeler", __name__, url_prefix="/modeler")
+api_bp = Blueprint("model_api", __name__, url_prefix="/api/model")
 
 
 def _load_domains() -> list[Domain]:
@@ -109,4 +113,47 @@ def draft_review():
 
     domains = _load_domains()
     return render_template("draft_review.html", domains=domains, draft=draft)
+
+
+@api_bp.route("/publish", methods=["POST"])
+def publish_model() -> tuple[dict[str, object], int] | tuple[str, int]:
+    """Trigger the publish workflow for a domain."""
+
+    payload = request.get_json(silent=True) or {}
+    domain_id = payload.get("domain_id")
+    version_tag = payload.get("version_tag")
+
+    if domain_id is None:
+        return jsonify({"message": "'domain_id' is required."}), 400
+
+    try:
+        domain_id_int = int(domain_id)
+    except (TypeError, ValueError):
+        return jsonify({"message": "'domain_id' must be an integer."}), 400
+
+    artifacts_dir = Path(current_app.config["ARTIFACTS_DIR"])
+    service = PublishService(artifacts_dir)
+
+    with get_db() as session:
+        domain = session.get(Domain, domain_id_int)
+        if domain is None:
+            return jsonify({"message": "Domain not found."}), 404
+
+        try:
+            result = service.publish(session, domain, version_tag=version_tag)
+        except PublishBlocked as blocked:
+            return (
+                jsonify(
+                    {
+                        "message": "Publication blocked by quality gates.",
+                        "preview": blocked.preview.to_dict(),
+                    }
+                ),
+                400,
+            )
+        except ValueError as exc:
+            return jsonify({"message": str(exc)}), 400
+
+        response = result.to_dict()
+        return jsonify(response), 200
 
