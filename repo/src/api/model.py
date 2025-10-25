@@ -9,7 +9,7 @@ from src.models.db import session_scope
 from src.models.tables import Domain
 from src.services.llm_modeler import ModelingService
 from src.services.settings import load_settings
-from src.services.validators import DraftRequest
+from src.services.form_validators import DraftRequest
 
 bp = Blueprint("modeler", __name__, url_prefix="/modeler")
 

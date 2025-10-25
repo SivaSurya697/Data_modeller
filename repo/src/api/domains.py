@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
 from src.models.tables import Domain
-from src.services.validators import DomainInput
+from src.services.form_validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/domains")
 

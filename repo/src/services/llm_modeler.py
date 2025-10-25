@@ -10,7 +10,7 @@ from src.services.context_builder import build_prompt, load_context
 from src.services.impact import evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import AppSettings
-from src.services.validators import DraftRequest
+from src.services.form_validators import DraftRequest
 
 
 @dataclass(slots=True)

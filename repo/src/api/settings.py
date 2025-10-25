@@ -8,7 +8,7 @@ from sqlalchemy import select
 from src.models.db import session_scope
 from src.models.tables import Setting
 from src.services.settings import load_settings
-from src.services.validators import SettingInput
+from src.services.form_validators import SettingInput
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 

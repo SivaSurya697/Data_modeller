@@ -12,7 +12,7 @@ from src.models.db import session_scope
 from src.models.tables import DataModel, ExportRecord
 from src.services.exporters.dictionary import export_dictionary
 from src.services.exporters.plantuml import export_plantuml
-from src.services.validators import ExportRequest
+from src.services.form_validators import ExportRequest
 
 bp = Blueprint("exports", __name__, url_prefix="/exports")
 

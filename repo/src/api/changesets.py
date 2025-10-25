@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
 from src.models.tables import ChangeSet, DataModel
-from src.services.validators import ChangeSetInput
+from src.services.form_validators import ChangeSetInput
 
 bp = Blueprint("changesets", __name__, url_prefix="/changesets")
 

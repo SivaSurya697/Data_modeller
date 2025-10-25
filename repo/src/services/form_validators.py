@@ -1,0 +1,52 @@
+"""Pydantic schemas for HTML form submissions."""
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class SettingInput(BaseModel):
+    """Validate persisted setting entries."""
+
+    key: str = Field(min_length=1, max_length=255)
+    value: str = Field(min_length=1)
+
+
+class DomainInput(BaseModel):
+    """Validate domain creation input."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+
+
+class DraftRequest(BaseModel):
+    """Validate requests for new model drafts."""
+
+    domain_id: int
+    instructions: str | None = None
+
+
+class ChangeSetInput(BaseModel):
+    """Validate changeset form submissions."""
+
+    model_id: int
+    description: str = Field(min_length=1)
+
+
+class ExportRequest(BaseModel):
+    """Validate export request input."""
+
+    model_id: int
+    exporter: str
+
+    @field_validator("exporter")
+    @classmethod
+    def ensure_known_exporter(cls, value: str) -> str:
+        allowed: tuple[Literal["dictionary"], Literal["plantuml"]] = (
+            "dictionary",
+            "plantuml",
+        )
+        if value not in allowed:
+            raise ValueError("Unsupported exporter requested")
+        return value
