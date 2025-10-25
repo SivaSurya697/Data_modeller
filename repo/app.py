@@ -13,8 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.api import (
-    coverage,
     changesets,
+    coverage,
     domains,
     exports,
     model,
@@ -158,6 +158,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(changesets.bp)
     app.register_blueprint(coverage.bp)
     app.register_blueprint(quality.bp)
+
     app.register_blueprint(exports.bp)
     app.register_blueprint(sources_bp, url_prefix="/api/sources")
 
