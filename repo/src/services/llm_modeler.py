@@ -1,18 +1,15 @@
-"""Prompt builders for the modelling workflows."""
+"""Orchestration layer for generating model drafts."""
+
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
-from types import SimpleNamespace
-
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import Attribute, Entity, Relationship
-from src.services.context_builder import build_prompt, load_context
-from src.services.impact import compute_impact
+from src.models.tables import Attribute, DataModel, Entity, Relationship
+from src.services.context_builder import DomainContext, build_prompt, load_context
+from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 from src.services.validators import DraftRequest
@@ -20,77 +17,103 @@ from src.services.validators import DraftRequest
 
 @dataclass(slots=True)
 class DraftResult:
-    """Structured response returned to the API layer."""
+    """Result returned by :class:`ModelingService`."""
 
+    model: DataModel
     entities: list[Entity]
-    impact: list[str]
+    impact: list[ImpactItem]
 
 
 class ModelingService:
-    """Coordinates prompt building, LLM invocation and persistence."""
+    """Generates model drafts using the language model."""
 
-    def generate_draft(
-        self,
-        session: Session,
-        request: DraftRequest,
-        *,
-        user_id: str = DEFAULT_USER_ID,
-    ) -> DraftResult:
-        """Create and persist a model draft for the provided domain."""
+    def __init__(self, *, user_id: str = DEFAULT_USER_ID) -> None:
+        self._user_id = user_id
 
+    def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
         context = load_context(session, request.domain_id)
+        previous_entities = list(context.entities)
         prompt = build_prompt(context, request.instructions)
-        user_settings = get_user_settings(session, user_id)
+        user_settings = get_user_settings(session, self._user_id)
         client = LLMClient(user_settings)
         payload = client.generate_model_payload(prompt)
 
-        name = str(payload.get("name") or f"{domain.name} Model")
-        summary = str(payload.get("summary") or "Model summary pending review.")
-        definition = str(payload.get("definition") or "")
+        model = self._persist_model(session, context, payload, request.instructions)
+
+        change_hints = payload.get("changes")
+        if isinstance(change_hints, str):
+            hints_iter: list[str] | None = [change_hints]
+        elif isinstance(change_hints, list):
+            hints_iter = [str(item) for item in change_hints if str(item).strip()]
+        else:
+            hints_iter = None
+
+        impact = evaluate_model_impact(previous_entities, model.domain.entities, hints_iter)
+
+        return DraftResult(model=model, entities=model.domain.entities, impact=impact)
+
+    def _persist_model(
+        self,
+        session: Session,
+        context: DomainContext,
+        payload: Mapping[str, Any],
+        instructions: str | None,
+    ) -> DataModel:
+        domain = context.domain
+
+        name = str(payload.get("name") or f"{domain.name} Model").strip()
+        summary = str(payload.get("summary") or "Model summary pending review.").strip()
+        definition = str(payload.get("definition") or "").strip()
         if not definition:
             raise ValueError("Model definition missing from LLM response")
 
-        previous_entities = [
-            SimpleNamespace(
-                name=entity.name,
-                description=entity.description,
-                documentation=entity.documentation,
-                attributes=[
-                    SimpleNamespace(
-                        name=attribute.name,
-                        data_type=attribute.data_type,
-                        description=attribute.description,
-                        is_nullable=attribute.is_nullable,
-                    )
-                    for attribute in entity.attributes
-                ],
-            )
-            for entity in context.entities
-        ]
-
-        # Replace existing entities and relationships for the domain with the new snapshot.
-        for relationship in list(context.domain.relationships):
+        # Replace existing entities and relationships for the domain.
+        for relationship in list(domain.relationships):
             session.delete(relationship)
-        for entity in list(context.domain.entities):
+        for entity in list(domain.entities):
             session.delete(entity)
         session.flush()
 
-        entities: list[Entity] = []
-        relationships: list[Relationship] = []
+        entities = self._build_entities(domain, payload)
+        for entity in entities:
+            session.add(entity)
+        session.flush()
 
+        relationships = self._build_relationships(domain, entities, payload)
+        for relationship in relationships:
+            session.add(relationship)
+
+        model = DataModel(
+            domain=domain,
+            name=name or f"{domain.name} Model",
+            summary=summary or "Model summary pending review.",
+            definition=definition,
+            instructions=instructions.strip() if instructions else None,
+        )
+        session.add(model)
+        session.flush()
+
+        return model
+
+    def _build_entities(self, domain: Any, payload: Mapping[str, Any]) -> list[Entity]:
+        entities: list[Entity] = []
         raw_entities = payload.get("entities")
-        if isinstance(raw_entities, list) and raw_entities:
+        if isinstance(raw_entities, list):
             for index, item in enumerate(raw_entities, start=1):
-                entity_name = str(item.get("name") or f"{context.domain.name} Entity {index}")
+                if not isinstance(item, dict):
+                    continue
+                entity_name = str(item.get("name") or f"{domain.name} Entity {index}").strip()
                 entity = Entity(
-                    domain=context.domain,
-                    name=entity_name.strip(),
+                    domain=domain,
+                    name=entity_name,
                     description=(str(item.get("description")) or "").strip() or None,
                     documentation=(str(item.get("documentation")) or "").strip() or None,
                 )
                 attributes_raw = item.get("attributes")
                 if isinstance(attributes_raw, list):
                     for attribute_item in attributes_raw:
+                        if not isinstance(attribute_item, dict):
+                            continue
                         attr_name = str(attribute_item.get("name") or "").strip()
                         if not attr_name:
                             continue
@@ -115,21 +138,28 @@ class ModelingService:
                         )
                         entity.attributes.append(attribute)
                 entities.append(entity)
-        else:
-            if not definition:
-                raise ValueError("Model definition missing from LLM response")
-            entity = Entity(
-                domain=context.domain,
-                name=name.strip(),
-                description=summary.strip() or None,
-                documentation=definition.strip(),
+        if not entities:
+            # Fall back to a single entity describing the domain using the definition.
+            entities.append(
+                Entity(
+                    domain=domain,
+                    name=f"{domain.name} Entity",
+                    description=payload.get("summary"),
+                    documentation=payload.get("definition"),
+                )
             )
-            entities.append(entity)
+        return entities
 
+    def _build_relationships(
+        self, domain: Any, entities: list[Entity], payload: Mapping[str, Any]
+    ) -> list[Relationship]:
+        relationships: list[Relationship] = []
         name_to_entity = {entity.name: entity for entity in entities}
         relationships_raw = payload.get("relationships")
         if isinstance(relationships_raw, list):
             for item in relationships_raw:
+                if not isinstance(item, dict):
+                    continue
                 from_name = str(
                     item.get("from")
                     or item.get("source")
@@ -149,32 +179,19 @@ class ModelingService:
                 relationship_type = str(
                     item.get("type")
                     or item.get("relationship_type")
-                    or "relates_to"
+                    or "relates to"
                 ).strip()
-                relationship = Relationship(
-                    domain=context.domain,
-                    from_entity=name_to_entity[from_name],
-                    to_entity=name_to_entity[to_name],
-                    relationship_type=relationship_type,
-                    description=(str(item.get("description")) or "").strip() or None,
+                relationships.append(
+                    Relationship(
+                        domain=domain,
+                        from_entity=name_to_entity[from_name],
+                        to_entity=name_to_entity[to_name],
+                        relationship_type=relationship_type,
+                        description=(str(item.get("description")) or "").strip() or None,
+                    )
                 )
-                relationships.append(relationship)
+        return relationships
 
-        for entity in entities:
-            session.add(entity)
-        session.flush()
-        for relationship in relationships:
-            session.add(relationship)
-        session.flush()
 
-        change_hints_raw = payload.get("changes")
-        if isinstance(change_hints_raw, str):
-            change_hints = [change_hints_raw]
-        elif isinstance(change_hints_raw, list):
-            change_hints = [str(item) for item in change_hints_raw]
-        else:
-            change_hints = None
+__all__ = ["DraftResult", "ModelingService"]
 
-        impact = evaluate_model_impact(previous_entities, entities, change_hints)
-
-        return DraftResult(entities=entities, impact=impact)

@@ -1,24 +1,21 @@
-"""Emit PlantUML diagrams from JSON model definitions."""
+"""PlantUML diagram exporter."""
+
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
-from typing import Any, Mapping
 
+from slugify import slugify
 
 from src.models.tables import Domain, Entity
 
 
 def _class_name(entity: Entity) -> str:
-    """Derive a PlantUML friendly class identifier."""
-
     token = slugify(entity.name, separator="_")
     return token or f"entity_{entity.id}"
 
 
 def export_plantuml(domain: Domain, output_dir: Path) -> Path:
-    """Generate a PlantUML class diagram for a domain."""
+    """Generate a PlantUML class diagram for ``domain``."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"{slugify(domain.name)}.puml"
@@ -60,34 +57,5 @@ def export_plantuml(domain: Domain, output_dir: Path) -> Path:
     return file_path
 
 
-def export_plantuml(model: "DataModel", output_dir: Path) -> Path:  # pragma: no cover - legacy shim
-    """Backward compatible wrapper for existing callers expecting ORM models."""
+__all__ = ["export_plantuml"]
 
-    payload = {
-        "name": model.name,
-        "definition": model.definition,
-        "domain": {"name": model.domain.name if model.domain else None},
-    }
-    return emit_plantuml(payload, output_dir)
-
-
-def _extract_name(model: Mapping[str, Any]) -> str:
-    value = str(model.get("name") or "Model").strip()
-    return value or "Model"
-
-
-def _extract_domain_name(model: Mapping[str, Any]) -> str:
-    domain = model.get("domain")
-    if isinstance(domain, Mapping):
-        raw = domain.get("name")
-    else:
-        raw = model.get("domain_name")
-    return str(raw).strip() if raw else ""
-
-
-def _slug(value: str) -> str:
-    slug = slugify(value)
-    return slug or "model"
-
-
-from src.models.tables import DataModel  # noqa: E402  # isort:skip

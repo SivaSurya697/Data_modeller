@@ -1,12 +1,13 @@
-"""Utilities for interacting with the OpenAI Chat Completions API."""
+"""Wrapper around the OpenAI client with sensible fallbacks."""
+
 from __future__ import annotations
 
+import json
 import logging
 import time
-from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Mapping, Sequence
 
-from openai import (
+from openai import (  # type: ignore[import-untyped]
     APIConnectionError,
     APIError,
     APITimeoutError,
@@ -14,7 +15,6 @@ from openai import (
     OpenAIError,
     RateLimitError,
 )
-from sqlalchemy.orm import Session
 
 from src.services.settings import UserSettings
 
@@ -27,11 +27,9 @@ _RECOVERABLE_ERRORS: tuple[type[OpenAIError], ...] = (
     APIError,
 )
 
-ChatMessage = Mapping[str, str]
 
-
-def get_openai_client(db: Session, user_id: int) -> OpenAI:
-    """Instantiate an OpenAI client for the provided database session."""
+class LLMClient:
+    """Thin wrapper around the OpenAI chat completions API."""
 
     def __init__(self, settings: UserSettings, model_name: str = DEFAULT_MODEL_NAME) -> None:
         if not settings.openai_api_key:
@@ -43,70 +41,71 @@ def get_openai_client(db: Session, user_id: int) -> OpenAI:
             base_url=settings.openai_base_url,
         )
 
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text = "".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, Mapping) and "text" in part
+    def generate_model_payload(self, prompt: str) -> Mapping[str, Any]:
+        """Return a JSON payload describing entities and relationships."""
+
+        response_text = self._chat_complete(
+            (
+                {"role": "system", "content": "You are a helpful data modelling assistant."},
+                {"role": "user", "content": prompt},
+            )
         )
-        if text:
-            return text
-    raise RuntimeError("OpenAI response did not include message content")
-
-
-def chat_complete(
-    db: Session,
-    user_id: int,
-    messages: Sequence[Mapping[str, Any]],
-    *,
-    model: str = DEFAULT_MODEL_NAME,
-    **kwargs: Any,
-) -> str:
-    """Execute a chat completion request with retry semantics."""
-
-    if not messages:
-        raise ValueError("messages must not be empty")
-
-    client = get_openai_client(db, user_id)
-    last_exc: OpenAIError | None = None
-
-    for attempt, delay in enumerate((1, 2, 4), start=1):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=_normalise_messages(messages),
-                **kwargs,
-            )
-            if not response.choices:
-                raise RuntimeError("OpenAI response did not include any choices")
-            message = response.choices[0].message
-            content = _coerce_content(message.content)
-            return content
-        except _RECOVERABLE_ERRORS as exc:
-            last_exc = exc
-            _LOGGER.warning(
-                "Recoverable OpenAI error during chat completion (attempt %s/3) for user %s: %s",
-                attempt,
-                user_id,
-                exc,
-            )
-            if attempt == 3:
-                break
-            time.sleep(delay)
-        except OpenAIError as exc:
-            _LOGGER.exception(
-                "OpenAI chat completion failed for user %s on attempt %s",
-                user_id,
-                attempt,
-            )
-            raise RuntimeError("OpenAI chat completion failed") from exc
+            payload = json.loads(response_text)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError("LLM response was not valid JSON") from exc
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("LLM response did not return a JSON object")
+        return payload
 
-    _LOGGER.error(
-        "OpenAI chat completion failed after %s attempts for user %s",
-        3,
-        user_id,
-        exc_info=last_exc,
-    )
-    raise RuntimeError("OpenAI chat completion failed after 3 attempts") from last_exc
+    def _chat_complete(self, messages: Sequence[Mapping[str, Any]]) -> str:
+        if not messages:
+            raise ValueError("messages must not be empty")
+
+        last_exc: OpenAIError | None = None
+        for attempt, delay in enumerate((1, 2, 4), start=1):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self._model_name,
+                    messages=list(messages),
+                    temperature=0.2,
+                )
+                if not response.choices:
+                    raise RuntimeError("OpenAI response did not include any choices")
+                message = response.choices[0].message
+                content = getattr(message, "content", None)
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, Sequence):
+                    text = "".join(
+                        part.get("text", "")
+                        for part in content
+                        if isinstance(part, Mapping) and "text" in part
+                    )
+                    if text:
+                        return text
+                raise RuntimeError("OpenAI response did not include message content")
+            except _RECOVERABLE_ERRORS as exc:
+                last_exc = exc
+                _LOGGER.warning(
+                    "Recoverable OpenAI error during chat completion (attempt %s/3): %s",
+                    attempt,
+                    exc,
+                )
+                if attempt == 3:
+                    break
+                time.sleep(delay)
+            except OpenAIError as exc:
+                _LOGGER.exception("OpenAI chat completion failed on attempt %s", attempt)
+                raise RuntimeError("OpenAI chat completion failed") from exc
+
+        _LOGGER.error(
+            "OpenAI chat completion failed after %s attempts",
+            3,
+            exc_info=last_exc,
+        )
+        raise RuntimeError("OpenAI chat completion failed after retries") from last_exc
+
+
+__all__ = ["LLMClient", "DEFAULT_MODEL_NAME"]
+
