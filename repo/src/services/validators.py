@@ -116,6 +116,12 @@ class ExportRequest(BaseModel):
         return value
 
 
+class CoverageAnalysisRequest(BaseModel):
+    """Validate coverage analysis requests."""
+
+    domain_id: int
+
+
 class SourceColumnInput(BaseModel):
     """Validate column metadata supplied during source imports."""
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, jsonify, render_template, request
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -76,8 +78,23 @@ def import_sources():
     """Persist metadata for a source system and its tables."""
 
     payload = request.get_json(silent=True)
+    if payload is None and request.form:
+        raw_payload = request.form.get("payload")
+        if raw_payload:
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError as exc:  # pragma: no cover - defensive branch
+                return jsonify({"error": f"Invalid JSON payload: {exc}"}), 400
+
     if payload is None:
-        return jsonify({"error": "Request body must be JSON."}), 400
+        raw_body = request.data.decode().strip()
+        if raw_body:
+            try:
+                payload = json.loads(raw_body)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Request body must be JSON."}), 400
+        else:
+            return jsonify({"error": "Request body must be JSON."}), 400
 
     try:
         request_model = SourceImportRequest(**payload)
@@ -110,12 +127,57 @@ def profile_table():
     """Update profiling statistics for a previously imported table."""
 
     payload = request.get_json(silent=True)
+    if payload is None and request.form:
+        payload = request.form.to_dict()
+
+    if payload is None and request.data:
+        raw_body = request.data.decode().strip()
+        if raw_body:
+            try:
+                payload = json.loads(raw_body)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Request body must be JSON."}), 400
+
     if payload is None:
         return jsonify({"error": "Request body must be JSON."}), 400
+
+    if "table_id" in payload:
+        try:
+            payload["table_id"] = int(payload["table_id"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "table_id must be an integer"}), 400
+
+    if isinstance(payload.get("samples"), str):
+        try:
+            payload["samples"] = json.loads(payload["samples"])
+        except json.JSONDecodeError:
+            return jsonify({"error": "samples must be valid JSON"}), 400
+
+    if isinstance(payload.get("total_rows"), str) and payload["total_rows"] != "":
+        try:
+            payload["total_rows"] = int(payload["total_rows"])
+        except ValueError:
+            return jsonify({"error": "total_rows must be an integer"}), 400
 
     try:
         request_model = SourceProfileRequest(**payload)
     except ValidationError as exc:
+        if not payload.get("samples"):
+            table_id = payload.get("table_id")
+            if table_id is None:
+                return jsonify({"error": exc.errors()}), 400
+
+            with get_db() as session:
+                stmt = (
+                    select(SourceTable)
+                    .options(joinedload(SourceTable.columns))
+                    .where(SourceTable.id == table_id)
+                )
+                result = session.execute(stmt).unique().scalar_one_or_none()
+                if result is None:
+                    return jsonify({"error": f"Source table {table_id} was not found"}), 404
+            return jsonify(_serialize_table(result)), 200
+
         return jsonify({"error": exc.errors()}), 400
 
     with get_db() as session:
@@ -145,7 +207,7 @@ def index():
 
     with get_db() as session:
         systems = _service.list_systems(session)
-    return render_template("sources.html", systems=systems)
+    return render_template("sources.html", sources=systems)
 
 
 __all__ = ["bp", "ui_bp"]

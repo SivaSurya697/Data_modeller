@@ -147,6 +147,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(model.bp)
     app.register_blueprint(relationships.bp)
     app.register_blueprint(changesets.bp)
+    app.register_blueprint(coverage.bp)
     app.register_blueprint(exports.bp)
     app.register_blueprint(sources_bp, url_prefix="/api/sources")
 
