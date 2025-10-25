@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+import json
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,8 @@ from src.models.db import get_db
 from src.models.tables import SourceSystem, SourceTable
 from src.services.profiler import merge_statistics, summarise_preview
 
-bp = Blueprint("sources_api", __name__, url_prefix="/api/sources")
+bp = Blueprint("sources_api", __name__)
+ui_bp = Blueprint("sources", __name__, url_prefix="/sources")
 
 _DEFAULT_SYSTEM_NAME = "default"
 _DEFAULT_CONNECTION_TYPE = "external"
@@ -113,8 +114,23 @@ def import_sources():
     """Create or update source metadata in bulk."""
 
     payload = request.get_json(silent=True)
+    if payload is None and request.form:
+        raw_payload = request.form.get("payload")
+        if raw_payload:
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError as exc:  # pragma: no cover - defensive branch
+                return jsonify({"error": f"Invalid JSON payload: {exc}"}), 400
+
     if payload is None:
-        return jsonify({"error": "Request body must be JSON."}), 400
+        raw_body = request.data.decode().strip()
+        if raw_body:
+            try:
+                payload = json.loads(raw_body)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Request body must be JSON."}), 400
+        else:
+            return jsonify({"error": "Request body must be JSON."}), 400
 
     sources = payload.get("sources")
     if not isinstance(sources, list):
@@ -237,25 +253,58 @@ def profile_source():
     """Update profiling statistics for a source."""
 
     payload = request.get_json(silent=True)
+    if payload is None and request.form:
+        payload = request.form.to_dict()
+
+    if payload is None and request.data:
+        raw_body = request.data.decode().strip()
+        if raw_body:
+            try:
+                payload = json.loads(raw_body)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Request body must be JSON."}), 400
+
     if payload is None:
         return jsonify({"error": "Request body must be JSON."}), 400
 
-    name = payload.get("name")
-    rows = payload.get("preview_rows")
-    total_rows = payload.get("row_count")
+    if "table_id" in payload:
+        try:
+            payload["table_id"] = int(payload["table_id"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "table_id must be an integer"}), 400
 
-    if not isinstance(name, str) or not name.strip():
-        return jsonify({"error": "Profiling payload requires a 'name'."}), 400
-    if rows is None:
-        return jsonify({"error": "Profiling payload requires 'preview_rows'."}), 400
-    if not isinstance(rows, list):
-        return jsonify({"error": "'preview_rows' must be an array."}), 400
+    if isinstance(payload.get("samples"), str):
+        try:
+            payload["samples"] = json.loads(payload["samples"])
+        except json.JSONDecodeError:
+            return jsonify({"error": "samples must be valid JSON"}), 400
+
+    if isinstance(payload.get("total_rows"), str) and payload["total_rows"] != "":
+        try:
+            payload["total_rows"] = int(payload["total_rows"])
+        except ValueError:
+            return jsonify({"error": "total_rows must be an integer"}), 400
 
     try:
-        with get_db() as session:
-            table = _find_table_by_name(session, name)
-            if table is None:
-                return jsonify({"error": f"Source '{name}' was not found."}), 404
+        request_model = SourceProfileRequest(**payload)
+    except ValidationError as exc:
+        if not payload.get("samples"):
+            table_id = payload.get("table_id")
+            if table_id is None:
+                return jsonify({"error": exc.errors()}), 400
+
+            with get_db() as session:
+                stmt = (
+                    select(SourceTable)
+                    .options(joinedload(SourceTable.columns))
+                    .where(SourceTable.id == table_id)
+                )
+                result = session.execute(stmt).unique().scalar_one_or_none()
+                if result is None:
+                    return jsonify({"error": f"Source table {table_id} was not found"}), 404
+            return jsonify(_serialize_table(result)), 200
+
+        return jsonify({"error": exc.errors()}), 400
 
             preview = summarise_preview(rows)
             profiled_at = _parse_datetime(preview.get("profiled_at")) or datetime.now(
@@ -280,24 +329,9 @@ def profile_source():
 
             table.table_statistics = merge_statistics(table.table_statistics, stats_update)
 
-            session.flush()
-            serialised = _serialise_table(table)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    return jsonify({"source": serialised})
-
-
-def _parse_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str) and value:
-        try:
-            parsed = datetime.fromisoformat(value)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
+    with get_db() as session:
+        systems = _service.list_systems(session)
+    return render_template("sources.html", sources=systems)
 
 
 __all__ = ["bp"]

@@ -15,6 +15,7 @@
         <a href="{{ url_for('modeler.draft_review') }}">Draft Review</a>
         <a href="{{ url_for('changesets.index') }}">Changesets</a>
         <a href="{{ url_for('exports.index') }}">Exports</a>
+        <a href="{{ url_for('list_sources') }}">Sources</a>
     </nav>
 </header>
 <main>
@@ -27,5 +28,6 @@
     {% endwith %}
     {% block content %}{% endblock %}
 </main>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </body>
 </html>

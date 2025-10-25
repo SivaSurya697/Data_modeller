@@ -5,15 +5,17 @@
 {% block content %}
 <section>
     <h2>Source Registry</h2>
-    <p>Capture metadata about upstream systems, profile sampled data and review the persisted statistics.</p>
+    <p>Import metadata describing upstream systems and review existing tables and profiling statistics.</p>
 </section>
 
-<section>
-    <form id="importForm" novalidate>
-        <h3>Import source metadata</h3>
-        <p class="form-help">Submit JSON describing a source system and its tables. Existing records are updated in place.</p>
-        <label for="importPayload">Import payload</label>
-        <textarea id="importPayload" rows="12">{
+<div class="card-grid">
+    <section class="card">
+        <header>
+            <h3>Import Sources</h3>
+            <p class="muted">Submit JSON describing a source system and its tables.</p>
+        </header>
+        <label for="import-payload" class="visually-hidden">Source import payload</label>
+        <textarea id="import-payload" rows="14">{
     "system": {
         "name": "Analytics Warehouse",
         "description": "Demo Snowflake environment",
@@ -31,10 +33,16 @@
         }
     ]
 }</textarea>
-        <button type="submit">Import metadata</button>
-        <pre id="importFeedback" class="feedback" aria-live="polite"></pre>
-    </form>
-</section>
+        <button
+            type="button"
+            hx-post="/api/sources/import"
+            hx-vals='js:{ payload: document.getElementById("import-payload").value }'
+            hx-target="#source-detail"
+            hx-swap="innerHTML"
+        >
+            Import metadata
+        </button>
+    </section>
 
 <section>
     <form id="profileForm" novalidate>
@@ -42,8 +50,8 @@
         <p class="form-help">Choose a table and provide sampled rows to calculate descriptive statistics.</p>
         <label for="profileTable">Table</label>
         <select id="profileTable" name="table_id">
-            {% if systems %}
-                {% for system in systems %}
+            {% if sources %}
+                {% for system in sources %}
                     {% for table in system.tables %}
                         <option value="{{ table.id }}">{{ system.name }} · {{ table.schema_name }}.{{ table.table_name }}</option>
                     {% endfor %}
@@ -67,8 +75,8 @@
 
 <section class="source-list">
     <h3>Registered sources</h3>
-    {% if systems %}
-        {% for system in systems %}
+    {% if sources %}
+        {% for system in sources %}
             <article class="source-system">
                 <header>
                     <h4>{{ system.name }}</h4>
@@ -184,34 +192,5 @@
         });
     }
 
-    const profileForm = document.getElementById('profileForm');
-    if (profileForm) {
-        profileForm.addEventListener('submit', (event) => {
-            event.preventDefault();
-            const feedbackEl = document.getElementById('profileFeedback');
-            const select = document.getElementById('profileTable');
-            if (!select || !select.value) {
-                renderFeedback(feedbackEl, 'Select a table to profile.', true);
-                return;
-            }
-            const rowsInput = document.getElementById('profileRows');
-            const totalRowsInput = document.getElementById('profileTotalRows');
-            try {
-                const rows = JSON.parse(rowsInput.value || '[]');
-                const payload = {
-                    table_id: Number.parseInt(select.value, 10),
-                    rows,
-                };
-                const total = totalRowsInput.value.trim();
-                if (total) {
-                    payload.total_rows = Number.parseInt(total, 10);
-                }
-                postJson('/api/sources/profile', payload, feedbackEl);
-            } catch (error) {
-                renderFeedback(feedbackEl, 'Invalid sample JSON: ' + error.message, true);
-            }
-        });
-    }
-})();
-</script>
+<section id="source-detail" class="card"></section>
 {% endblock %}

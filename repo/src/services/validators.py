@@ -117,7 +117,7 @@ class ExportRequest(BaseModel):
 
 
 class CoverageAnalysisRequest(BaseModel):
-    """Validate coverage analysis API payloads."""
+    """Validate coverage analysis requests."""
 
     domain_id: int
 
