@@ -16,15 +16,12 @@ bp = Blueprint("domains", __name__, url_prefix="/domains")
 
 def _load_domains() -> list[Domain]:
     with get_db() as session:
-        domains = list(
-            session.execute(
-                select(Domain)
-                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
-                .order_by(Domain.name)
-            )
-            .unique()
-            .scalars()
+        stmt = (
+            select(Domain)
+            .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+            .order_by(Domain.name)
         )
+        domains = list(session.scalars(stmt).unique())
     return domains
 
 
