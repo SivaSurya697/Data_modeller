@@ -30,6 +30,11 @@ def client(app):
     return app.test_client()
 
 
+def test_sources_blueprints_registered(app):
+    assert "sources_api" in app.blueprints
+    assert "sources" in app.blueprints
+
+
 @pytest.fixture
 def session():
     with db_module.session_scope() as session:
