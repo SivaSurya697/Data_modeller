@@ -177,6 +177,50 @@ button:hover {
     color: #922b21;
 }
 
+.source-list {
+    margin-top: 2rem;
+}
+
+.source-system {
+    background: #fff;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    margin-bottom: 1.5rem;
+}
+
+.source-system header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+}
+
+.source-connection {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #1b4f72;
+}
+
+.source-tables details {
+    margin-top: 1rem;
+    background: #fdfefe;
+    border: 1px solid #d5d8dc;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+}
+
+.source-tables summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.muted {
+    color: #7b8591;
+    font-style: italic;
+}
+
 code {
     background-color: #f0f3f4;
     padding: 0.2rem 0.4rem;

@@ -77,6 +77,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(relationships.bp)
     app.register_blueprint(changesets.bp)
     app.register_blueprint(exports.bp)
+    app.register_blueprint(sources.bp)
+    app.register_blueprint(sources.ui_bp)
 
 
 if __name__ == "__main__":

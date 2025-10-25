@@ -115,6 +115,76 @@ class ExportRequest(BaseModel):
         return value
 
 
+class SourceColumnInput(BaseModel):
+    """Validate column metadata supplied during source imports."""
+
+    name: str = Field(min_length=1, max_length=255)
+    data_type: str | None = Field(default=None, max_length=255)
+    is_nullable: bool = True
+    ordinal_position: int | None = Field(default=None, ge=1)
+    description: str | None = None
+    statistics: dict[str, Any] | None = None
+    sample_values: list[Any] | None = None
+
+
+class SourceTableInput(BaseModel):
+    """Validate table metadata supplied during source imports."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_name: str = Field(min_length=1, max_length=255)
+    table_name: str = Field(min_length=1, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    schema_definition: dict[str, Any] | None = Field(default=None, alias="schema")
+    table_statistics: dict[str, Any] | None = Field(
+        default=None, alias="statistics"
+    )
+    row_count: int | None = Field(default=None, ge=0)
+    sampled_row_count: int | None = Field(default=None, ge=0)
+    profiled_at: datetime | None = None
+    columns: list[SourceColumnInput] = Field(default_factory=list)
+
+    @field_validator("columns")
+    @classmethod
+    def ensure_unique_columns(
+        cls, value: list[SourceColumnInput]
+    ) -> list[SourceColumnInput]:
+        seen: set[str] = set()
+        for column in value:
+            key = column.name.strip().lower()
+            if key in seen:
+                raise ValueError("Duplicate column name detected")
+            seen.add(key)
+        return value
+
+
+class SourceSystemInput(BaseModel):
+    """Validate source system metadata."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    connection_type: str = Field(min_length=1, max_length=100)
+    connection_config: dict[str, Any] | None = None
+
+
+class SourceImportRequest(BaseModel):
+    """Validate source import requests."""
+
+    system: SourceSystemInput
+    tables: list[SourceTableInput] = Field(default_factory=list)
+
+
+class SourceProfileRequest(BaseModel):
+    """Validate profile submissions containing sampled rows."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    table_id: int
+    samples: list[dict[str, Any]] = Field(default_factory=list, alias="rows")
+    total_rows: int | None = Field(default=None, ge=0)
+
+
 __all__ = [
     "ChangeSetInput",
     "DomainInput",
@@ -123,6 +193,11 @@ __all__ = [
     "EntitySpec",
     "ModelDraftPayload",
     "ExportRequest",
+    "SourceColumnInput",
+    "SourceImportRequest",
+    "SourceProfileRequest",
+    "SourceSystemInput",
+    "SourceTableInput",
     "UserSettingsInput",
 ]
 

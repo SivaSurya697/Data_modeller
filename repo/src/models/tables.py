@@ -335,6 +335,97 @@ class ExportRecord(Base, TimestampMixin):
     domain: Mapped[Domain] = relationship("Domain", back_populates="exports")
 
 
+class SourceSystem(Base, TimestampMixin):
+    """Physical system that exposes one or more source tables."""
+
+    __tablename__ = "source_systems"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connection_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    connection_config: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    last_imported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    tables: Mapped[list["SourceTable"]] = relationship(
+        "SourceTable",
+        back_populates="system",
+        cascade="all, delete-orphan",
+        order_by="SourceTable.table_name",
+    )
+
+
+class SourceTable(Base, TimestampMixin):
+    """Table or view discovered from a source system."""
+
+    __tablename__ = "source_tables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    system_id: Mapped[int] = mapped_column(
+        ForeignKey("source_systems.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_definition: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    table_statistics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sampled_row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profiled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "system_id",
+            "schema_name",
+            "table_name",
+            name="uq_source_table_identity",
+        ),
+    )
+
+    system: Mapped[SourceSystem] = relationship("SourceSystem", back_populates="tables")
+    columns: Mapped[list["SourceColumn"]] = relationship(
+        "SourceColumn",
+        back_populates="table",
+        cascade="all, delete-orphan",
+        order_by="SourceColumn.ordinal_position",
+    )
+
+
+class SourceColumn(Base, TimestampMixin):
+    """Column captured during source import or profiling."""
+
+    __tablename__ = "source_columns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_id: Mapped[int] = mapped_column(
+        ForeignKey("source_tables.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_nullable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ordinal_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    statistics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sample_values: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("table_id", "name", name="uq_source_column_identity"),
+    )
+
+    table: Mapped[SourceTable] = relationship("SourceTable", back_populates="columns")
+
+
 __all__ = [
     "Attribute",
     "ChangeSet",
@@ -343,6 +434,9 @@ __all__ = [
     "Entity",
     "EntityRole",
     "ExportRecord",
+    "SourceColumn",
+    "SourceSystem",
+    "SourceTable",
     "Relationship",
     "ReviewTask",
     "SCDType",
