@@ -59,7 +59,8 @@ The ORM models in `src/models/tables.py` define the storage schema:
 
 - `load_context(session, domain_id)` loads the target domain, existing entities, relationships, change sets, and settings.
 - `DomainContext.to_prompt_sections()` compiles human-readable sections for prompts.
-- `build_prompt()` assembles the final prompt, optionally adding user instructions and requesting a JSON response describing entities, attributes, and relationships.
+- `build_draft_messages()` generates the system/user messages for the initial modelling pass.
+- `build_critique_messages()` produces the follow-up critique instructions including the draft JSON payload.
 
 ### LLM orchestration (`src/services/llm_client.py` and `src/services/llm_modeler.py`)
 
@@ -88,7 +89,7 @@ New exporters can be added by following the same signature and registering them 
 
 1. A user submits the draft form from `templates/draft_review.html` handled by `src/api/model.py`.
 2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `get_db()`.
-3. `ModelingService.generate_draft()` loads domain context, builds a prompt, invokes the OpenAI client, persists the new `DataModel`, and evaluates impact.
+3. `ModelingService.generate_draft()` loads domain context, builds the draft and critique prompts, runs both passes through the OpenAI client, applies any amendments, persists the new `DataModel`, and evaluates impact.
 4. The blueprint commits the transaction, flashes a success message, and renders the updated draft alongside impact highlights.
 
 ## Request flow example: exporting artifacts

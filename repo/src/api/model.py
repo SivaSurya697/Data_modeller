@@ -49,12 +49,15 @@ def _serialize_entity(entity: Entity) -> dict[str, object]:
 def _serialize_relationship(relationship: Relationship) -> dict[str, object]:
     left, right = extract_relationship_cardinality(relationship)
     return {
+        "id": getattr(relationship, "id", None),
         "from_name": relationship.from_entity.name,
         "to_name": relationship.to_entity.name,
         "type": relationship.relationship_type,
         "description": relationship.description,
         "from_cardinality": left,
         "to_cardinality": right,
+        "evidence": getattr(relationship, "evidence_json", None),
+        "inference_status": getattr(relationship, "inference_status", "manual"),
     }
 
 

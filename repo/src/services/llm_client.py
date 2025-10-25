@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Tuple
 
 from openai import (  # type: ignore[import-untyped]
     APIConnectionError,
@@ -42,23 +42,26 @@ class LLMClient:
             base_url=settings.openai_base_url,
         )
 
-    def generate_model_payload(self, prompt: str) -> Mapping[str, Any]:
-        """Return a JSON payload describing entities and relationships."""
+    def generate_draft_payload(
+        self, messages: Sequence[Mapping[str, Any]]
+    ) -> Mapping[str, Any]:
+        """Return the initial model payload from the draft prompt."""
 
-        response_text = self._chat_complete(
-            (
-                {"role": "system", "content": "You are a helpful data modelling assistant."},
-                {"role": "user", "content": prompt},
-            )
-        )
-        sanitized_text = self._sanitize_response(response_text)
-        try:
-            payload = json.loads(sanitized_text)
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
-            raise RuntimeError("LLM response was not valid JSON") from exc
-        if not isinstance(payload, Mapping):
-            raise RuntimeError("LLM response did not return a JSON object")
-        return payload
+        return self._parse_json_payload(self._chat_complete(messages))
+
+    def generate_critique_payload(
+        self, messages: Sequence[Mapping[str, Any]]
+    ) -> Tuple[Mapping[str, Any], Mapping[str, Any] | None]:
+        """Return the critique payload and an amended model when available."""
+
+        payload = self._parse_json_payload(self._chat_complete(messages))
+
+        amended_payload: Mapping[str, Any] | None = None
+        amended_raw = payload.get("amended_model")
+        if amended_raw is not None:
+            amended_payload = self._coerce_mapping(amended_raw)
+
+        return payload, amended_payload
 
     @staticmethod
     def _sanitize_response(response_text: str) -> str:
@@ -78,6 +81,29 @@ class LLMClient:
                 text = text[4:].lstrip()
 
         return text
+
+    def _parse_json_payload(self, response_text: str) -> Mapping[str, Any]:
+        sanitized_text = self._sanitize_response(response_text)
+        try:
+            payload = json.loads(sanitized_text)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError("LLM response was not valid JSON") from exc
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("LLM response did not return a JSON object")
+        return payload
+
+    def _coerce_mapping(self, value: Any) -> Mapping[str, Any] | None:
+        if isinstance(value, Mapping):
+            return value
+        if isinstance(value, str):
+            sanitized_text = self._sanitize_response(value)
+            try:
+                parsed = json.loads(sanitized_text)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(parsed, Mapping):
+                return parsed
+        return None
 
     def _chat_complete(self, messages: Sequence[Mapping[str, Any]]) -> str:
         if not messages:

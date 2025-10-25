@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
-    Boolean,
+    JSON,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
@@ -23,7 +24,6 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.sql import expression
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db import Base
@@ -134,6 +134,15 @@ class EntityRole(str, Enum):
     UNKNOWN = "unknown"
 
 
+class SCDType(str, Enum):
+    """Slowly changing dimension strategies supported by the modeller."""
+
+    NONE = "none"
+    TYPE_0 = "type_0"
+    TYPE_1 = "type_1"
+    TYPE_2 = "type_2"
+
+
 class Entity(Base, TimestampMixin):
     """Entity representing a conceptual object within a domain."""
 
@@ -146,17 +155,20 @@ class Entity(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     documentation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    entity_role: Mapped[EntityRole] = mapped_column(
+    role: Mapped[EntityRole] = mapped_column(
         SAEnum(EntityRole, name="entity_role_enum", validate_strings=True),
         nullable=False,
         default=EntityRole.UNKNOWN,
         server_default=EntityRole.UNKNOWN.value,
     )
-    is_locked: Mapped[bool] = mapped_column(
-        Boolean,
+    grain_json: Mapped[list[str] | dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    scd_type: Mapped[SCDType] = mapped_column(
+        SAEnum(SCDType, name="scd_type_enum", validate_strings=True),
         nullable=False,
-        default=False,
-        server_default=expression.false(),
+        default=SCDType.NONE,
+        server_default=SCDType.NONE.value,
     )
 
     __table_args__ = (UniqueConstraint("domain_id", "name", name="uq_entity_domain_name"),)
@@ -192,6 +204,8 @@ class Attribute(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_nullable: Mapped[bool] = mapped_column(default=True, nullable=False)
     default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_measure: Mapped[bool] = mapped_column(default=False, nullable=False)
+    is_surrogate_key: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     __table_args__ = (UniqueConstraint("entity_id", "name", name="uq_attribute_entity_name"),)
 
@@ -245,6 +259,10 @@ class Relationship(Base, TimestampMixin):
         default=RelationshipCardinality.UNKNOWN,
         server_default=RelationshipCardinality.UNKNOWN.value,
     )
+    inference_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="manual", server_default="manual"
+    )
+    evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -328,28 +346,95 @@ class ExportRecord(Base, TimestampMixin):
     domain: Mapped[Domain] = relationship("Domain", back_populates="exports")
 
 
-class PublishedModel(Base, TimestampMixin):
-    """Record of published dimensional model artifacts."""
+class SourceSystem(Base, TimestampMixin):
+    """Physical system that exposes one or more source tables."""
 
-    __tablename__ = "published_models"
+    __tablename__ = "source_systems"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    domain_id: Mapped[int] = mapped_column(
-        ForeignKey("domains.id", ondelete="CASCADE"), nullable=False
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connection_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    connection_config: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
     )
-    model_id: Mapped[int] = mapped_column(
-        ForeignKey("data_models.id", ondelete="CASCADE"), nullable=False
+    last_imported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
-    version_tag: Mapped[str] = mapped_column(String(100), nullable=False)
-    artifact_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    quality_report: Mapped[str] = mapped_column(Text, nullable=False)
+
+    tables: Mapped[list["SourceTable"]] = relationship(
+        "SourceTable",
+        back_populates="system",
+        cascade="all, delete-orphan",
+        order_by="SourceTable.table_name",
+    )
+
+
+class SourceTable(Base, TimestampMixin):
+    """Table or view discovered from a source system."""
+
+    __tablename__ = "source_tables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    system_id: Mapped[int] = mapped_column(
+        ForeignKey("source_systems.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_definition: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    table_statistics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sampled_row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profiled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
-        UniqueConstraint("domain_id", "version_tag", name="uq_published_domain_tag"),
+        UniqueConstraint(
+            "system_id",
+            "schema_name",
+            "table_name",
+            name="uq_source_table_identity",
+        ),
     )
 
-    domain: Mapped[Domain] = relationship("Domain", back_populates="published_models")
-    model: Mapped[DataModel] = relationship("DataModel", back_populates="publications")
+    system: Mapped[SourceSystem] = relationship("SourceSystem", back_populates="tables")
+    columns: Mapped[list["SourceColumn"]] = relationship(
+        "SourceColumn",
+        back_populates="table",
+        cascade="all, delete-orphan",
+        order_by="SourceColumn.ordinal_position",
+    )
+
+
+class SourceColumn(Base, TimestampMixin):
+    """Column captured during source import or profiling."""
+
+    __tablename__ = "source_columns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_id: Mapped[int] = mapped_column(
+        ForeignKey("source_tables.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_nullable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ordinal_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    statistics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sample_values: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("table_id", "name", name="uq_source_column_identity"),
+    )
+
+    table: Mapped[SourceTable] = relationship("SourceTable", back_populates="columns")
 
 
 __all__ = [
@@ -358,10 +443,14 @@ __all__ = [
     "DataModel",
     "Domain",
     "Entity",
+    "EntityRole",
     "ExportRecord",
-    "PublishedModel",
+    "SourceColumn",
+    "SourceSystem",
+    "SourceTable",
     "Relationship",
     "ReviewTask",
+    "SCDType",
     "Settings",
 ]
 

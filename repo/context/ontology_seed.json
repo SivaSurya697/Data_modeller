@@ -1,0 +1,57 @@
+{
+  "entities": [
+    {
+      "name": "Customer",
+      "description": "Represents an individual or organisation purchasing goods or services.",
+      "attributes": ["customer_id", "email_address", "created_at"]
+    },
+    {
+      "name": "Order",
+      "description": "Captures a purchase event that links customers to the products they buy.",
+      "attributes": ["order_id", "order_total", "customer_id", "order_date"]
+    },
+    {
+      "name": "Product",
+      "description": "Catalogue item available for sale.",
+      "attributes": ["product_id", "sku", "product_name"]
+    }
+  ],
+  "attributes": [
+    {
+      "name": "customer_id",
+      "description": "Unique identifier for a customer."
+    },
+    {
+      "name": "email_address",
+      "description": "Primary email contact for the customer."
+    },
+    {
+      "name": "order_id",
+      "description": "Identifier assigned to an order."
+    },
+    {
+      "name": "order_total",
+      "description": "Monetary total of an order."
+    },
+    {
+      "name": "order_date",
+      "description": "Date the order was placed."
+    },
+    {
+      "name": "product_id",
+      "description": "Identifier for a product."
+    },
+    {
+      "name": "sku",
+      "description": "Stock keeping unit."
+    },
+    {
+      "name": "product_name",
+      "description": "Human readable product label."
+    },
+    {
+      "name": "created_at",
+      "description": "Timestamp recording when the record was created."
+    }
+  ]
+}
