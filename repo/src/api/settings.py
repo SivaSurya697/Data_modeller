@@ -1,7 +1,9 @@
-"""Settings blueprint."""
+"""REST API endpoints for managing user settings."""
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from http import HTTPStatus
+
+from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
 from src.models.db import session_scope
@@ -13,12 +15,12 @@ from src.services.settings import (
 )
 from src.services.validators import UserSettingsInput
 
-bp = Blueprint("settings", __name__, url_prefix="/settings")
+bp = Blueprint("settings", __name__, url_prefix="/api/settings")
 
 
 @bp.route("/", methods=["GET"])
-def index() -> str:
-    """Render the settings dashboard."""
+def list_settings():
+    """Return stored user settings without revealing sensitive values."""
 
     stored: UserSettings | None = None
     with session_scope() as session:
@@ -30,9 +32,10 @@ def index() -> str:
 
 
 @bp.route("/", methods=["POST"])
-def persist() -> str:
-    """Persist a configuration override."""
+def update_settings():
+    """Persist user settings supplied as JSON."""
 
+    payload = request.get_json(silent=True) or {}
     try:
         payload = UserSettingsInput(**request.form)
     except ValidationError as exc:
