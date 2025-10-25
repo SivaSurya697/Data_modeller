@@ -155,35 +155,43 @@ _DRAFT_SYSTEM_MESSAGE = "You are a helpful data modelling assistant who produces
 _CRITIQUE_SYSTEM_MESSAGE = "You are a meticulous senior data modeller reviewing" \
     " a junior modeller's work."
 
+_SCHEMA_INSTRUCTIONS = (
+    "Respond with JSON describing the proposed entities. The top-level "
+    "object must include an 'entities' array where each entry has 'name', "
+    "'role', 'grain', 'scd_type', optional 'description', optional "
+    "'documentation', and an 'attributes' array. Each attribute must include "
+    "'name', optional 'data_type', optional 'description', 'is_nullable', "
+    "'is_measure', 'is_surrogate_key', and optional 'default'. Entity 'role' "
+    "must be one of: 'fact', 'dimension', 'bridge', or 'unknown'. 'grain' "
+    "must reference attribute names for that entity. 'scd_type' must be one "
+    "of: 'none', 'type_0', 'type_1', or 'type_2'. Optionally include a "
+    "'relationships' array (with 'from', 'to', 'type', 'cardinality_from', "
+    "and 'cardinality_to') and a 'changes' array with impact notes for "
+    "reviewers. Relationship cardinalities must each be one of: 'one', "
+    "'many', 'zero_or_one', 'zero_or_many', or 'unknown'."
+)
 
-def build_draft_messages(
-    context: DomainContext, instructions: str | None
-) -> list[dict[str, str]]:
-    """Generate system and user messages for the draft generation pass."""
+
+def build_prompt(context: DomainContext, instructions: str | None) -> str:
+    """Assemble the user prompt for drafting or critiquing messages."""
 
     sections = context.to_prompt_sections()
     if instructions:
         instructions_clean = instructions.strip()
         if instructions_clean:
             sections.append(f"Additional Instructions:\n{instructions_clean}")
-    sections.append(
-        "Respond with JSON describing the proposed entities. The top-level "
-        "object must include an 'entities' array where each entry has 'name', "
-        "'role', 'grain', 'scd_type', optional 'description', optional "
-        "'documentation', and an 'attributes' array. Each attribute must include "
-        "'name', optional 'data_type', optional 'description', 'is_nullable', "
-        "'is_measure', 'is_surrogate_key', and optional 'default'. Entity 'role' "
-        "must be one of: 'fact', 'dimension', 'bridge', or 'unknown'. 'grain' "
-        "must reference attribute names for that entity. 'scd_type' must be one "
-        "of: 'none', 'type_0', 'type_1', or 'type_2'. Optionally include a "
-        "'relationships' array (with 'from', 'to', 'type', 'cardinality_from', "
-        "and 'cardinality_to') and a 'changes' array with impact notes for "
-        "reviewers. Relationship cardinalities must each be one of: 'one', "
-        "'many', 'zero_or_one', 'zero_or_many', or 'unknown'."
-    )
+    sections.append(_SCHEMA_INSTRUCTIONS)
+    return "\n\n".join(sections)
+
+
+def build_draft_messages(
+    context: DomainContext, instructions: str | None
+) -> list[dict[str, str]]:
+    """Generate system and user messages for the draft generation pass."""
+
     return [
         {"role": "system", "content": _DRAFT_SYSTEM_MESSAGE},
-        {"role": "user", "content": "\n\n".join(sections)},
+        {"role": "user", "content": build_prompt(context, instructions)},
     ]
 
 
@@ -220,6 +228,7 @@ def build_critique_messages(
 
 __all__ = [
     "DomainContext",
+    "build_prompt",
     "build_critique_messages",
     "build_draft_messages",
     "load_context",
