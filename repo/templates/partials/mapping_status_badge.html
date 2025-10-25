@@ -1,0 +1,4 @@
+{% set mapping_id = mapping.mapping_id if mapping.mapping_id is defined else mapping.id %}
+{% set status_value = (mapping.status if mapping.status is defined else 'draft')|default('draft') %}
+{% set label = status_value|capitalize %}
+<span id="mapping-status-{{ mapping_id }}" class="status-badge status-{{ status_value }}">{{ label }}</span>

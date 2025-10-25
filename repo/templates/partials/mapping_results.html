@@ -1,0 +1,89 @@
+{% if created_count %}
+<p class="mapping-feedback">Autoplan created {{ created_count }} draft mapping{{ 's' if created_count != 1 else '' }}.</p>
+{% endif %}
+{% if rows %}
+<table class="table mapping-table">
+    <thead>
+        <tr>
+            <th scope="col">Attribute</th>
+            <th scope="col">Suggested source column</th>
+            <th scope="col">Confidence</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+        <tr id="mapping-row-{{ row.attribute_id }}">
+            <th scope="row">{{ row.attribute_name }}</th>
+            <td>
+                {% if row.top_candidate %}
+                    <strong>{{ row.top_candidate.source }}</strong>
+                    {% if row.top_candidate.rationale %}
+                        <div class="muted">{{ row.top_candidate.rationale }}</div>
+                    {% endif %}
+                    {% if row.candidates|length > 1 %}
+                        <details>
+                            <summary>Other candidates</summary>
+                            <ul>
+                                {% for candidate in row.candidates[1:] %}
+                                    <li>
+                                        {{ candidate.source }} – {{ (candidate.confidence * 100)|round(1) }}%
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                    {% endif %}
+                {% else %}
+                    <span class="muted">No candidates proposed.</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if row.top_candidate %}
+                    {{ (row.top_candidate.confidence * 100)|round(1) }}%
+                {% else %}
+                    –
+                {% endif %}
+            </td>
+            <td>
+                {% if row.mapping_id %}
+                    {% include 'partials/mapping_status_badge.html' with mapping=row %}
+                {% else %}
+                    <span class="status-badge status-none">Not persisted</span>
+                {% endif %}
+            </td>
+            <td class="actions">
+                {% if row.mapping_id %}
+                    <div class="button-group">
+                        <button
+                            type="button"
+                            class="btn"
+                            hx-patch="/api/mappings/{{ row.mapping_id }}"
+                            hx-vals='{"status": "approved"}'
+                            hx-target="#mapping-status-{{ row.mapping_id }}"
+                            hx-swap="outerHTML"
+                        >
+                            Approve
+                        </button>
+                        <button
+                            type="button"
+                            class="btn secondary"
+                            hx-patch="/api/mappings/{{ row.mapping_id }}"
+                            hx-vals='{"status": "rejected"}'
+                            hx-target="#mapping-status-{{ row.mapping_id }}"
+                            hx-swap="outerHTML"
+                        >
+                            Reject
+                        </button>
+                    </div>
+                {% else %}
+                    <span class="muted">Persist to manage status.</span>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No mapping suggestions available.</p>
+{% endif %}

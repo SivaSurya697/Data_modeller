@@ -18,6 +18,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum as SAEnum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -427,6 +428,46 @@ class SourceColumn(Base, TimestampMixin):
     table: Mapped[SourceTable] = relationship("SourceTable", back_populates="columns")
 
 
+class MappingStatus(str, Enum):
+    """Lifecycle states for attribute-to-source column mappings."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class Mapping(Base, TimestampMixin):
+    """Candidate or approved attribute mapping to a physical source column."""
+
+    __tablename__ = "mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
+    )
+    attribute_id: Mapped[int] = mapped_column(
+        ForeignKey("attributes.id", ondelete="CASCADE"), nullable=False
+    )
+    source_table_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_tables.id", ondelete="SET NULL"), nullable=True
+    )
+    column_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[MappingStatus] = mapped_column(
+        SAEnum(MappingStatus, name="mapping_status_enum", validate_strings=True),
+        nullable=False,
+        default=MappingStatus.DRAFT,
+        server_default=MappingStatus.DRAFT.value,
+    )
+    transforms_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    join_recipe: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    entity: Mapped[Entity] = relationship("Entity")
+    attribute: Mapped[Attribute] = relationship("Attribute")
+    source_table: Mapped[SourceTable | None] = relationship("SourceTable")
+
+
 __all__ = [
     "Attribute",
     "ChangeSet",
@@ -435,6 +476,8 @@ __all__ = [
     "Entity",
     "EntityRole",
     "ExportRecord",
+    "Mapping",
+    "MappingStatus",
     "SourceColumn",
     "SourceSystem",
     "SourceTable",

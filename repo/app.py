@@ -22,7 +22,8 @@ from src.api import (
     relationships,
     settings,
 )
-from src.api.sources import bp as sources_bp
+from src.api.mappings import bp as mappings_bp
+from src.api.sources import bp as sources_bp, ui_bp as sources_ui_bp
 from src.models.db import create_all, init_engine, load_database_url, session_scope
 from src.models.tables import SourceTable
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
@@ -159,7 +160,9 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(coverage.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(exports.bp)
+    app.register_blueprint(mappings_bp, url_prefix="/api/mappings")
     app.register_blueprint(sources_bp, url_prefix="/api/sources")
+    app.register_blueprint(sources_ui_bp)
 
 
 if __name__ == "__main__":
