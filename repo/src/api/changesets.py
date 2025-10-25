@@ -1,37 +1,42 @@
-"""Changeset endpoints."""
+"""API endpoints for working with change sets."""
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from pydantic import ValidationError
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from http import HTTPStatus
 
-from src.models.db import session_scope
-from src.models.tables import ChangeSet, Domain
+from flask import Blueprint, request
+from sqlalchemy import select
+
+from src.models.db import get_db
+from src.models.tables import ChangeSet, DataModel
 from src.services.validators import ChangeSetInput
 
-bp = Blueprint("changesets", __name__, url_prefix="/changesets")
+    header_candidates = ("X-User", "X-User-Email", "X-User-Id")
+    for header in header_candidates:
+        value = request.headers.get(header)
+        if value:
+            return value
+    return "system"
 
 
-def _load_domains() -> list[Domain]:
-    with session_scope() as session:
-        domains = list(
-            session.execute(select(Domain).order_by(Domain.name)).scalars()
+def _load_models() -> list[DataModel]:
+    with get_db() as session:
+        models = list(
+            session.execute(
+                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
+            ).scalars()
         )
     return domains
 
 
-@bp.route("/", methods=["GET"])
-def index() -> str:
-    """List changesets and provide creation form."""
+@bp.get("/")
+def index() -> tuple[list[dict[str, object]], int]:
+    """Return a list of change sets with minimal metadata."""
 
-    domains = _load_domains()
-    with session_scope() as session:
+    models = _load_models()
+    with get_db() as session:
         changesets = list(
             session.execute(
-                select(ChangeSet)
-                .options(joinedload(ChangeSet.domain))
-                .order_by(ChangeSet.created_at.desc())
+                select(ChangeSet).order_by(ChangeSet.created_at.desc())
             ).scalars()
         )
     return render_template(
@@ -49,10 +54,10 @@ def create() -> str:
         flash(f"Invalid input: {exc}", "error")
         return redirect(url_for("changesets.index"))
 
-    with session_scope() as session:
-        domain = session.get(Domain, payload.domain_id)
-        if domain is None:
-            flash("Domain not found.", "error")
+    with get_db() as session:
+        model = session.get(DataModel, payload.model_id)
+        if model is None:
+            flash("Model not found.", "error")
             return redirect(url_for("changesets.index"))
         session.add(
             ChangeSet(

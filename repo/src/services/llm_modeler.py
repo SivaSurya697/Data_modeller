@@ -1,7 +1,9 @@
 """High level modelling workflow using OpenAI."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from typing import Any
 
 from types import SimpleNamespace
 
@@ -11,7 +13,7 @@ from src.models.tables import Attribute, Entity, Relationship
 from src.services.context_builder import build_prompt, load_context
 from src.services.impact import evaluate_model_impact
 from src.services.llm_client import LLMClient
-from src.services.settings import AppSettings
+from src.services.settings import DEFAULT_USER_ID, get_user_settings
 from src.services.validators import DraftRequest
 
 
@@ -26,15 +28,19 @@ class DraftResult:
 class ModelingService:
     """Coordinates prompt building, LLM invocation and persistence."""
 
-    def __init__(self, settings: AppSettings) -> None:
-        self._settings = settings
-
-    def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
+    def generate_draft(
+        self,
+        session: Session,
+        request: DraftRequest,
+        *,
+        user_id: str = DEFAULT_USER_ID,
+    ) -> DraftResult:
         """Create and persist a model draft for the provided domain."""
 
         context = load_context(session, request.domain_id)
         prompt = build_prompt(context, request.instructions)
-        client = LLMClient(self._settings)
+        user_settings = get_user_settings(session, user_id)
+        client = LLMClient(user_settings)
         payload = client.generate_model_payload(prompt)
 
         name = str(payload.get("name") or f"{context.domain.name} Model")

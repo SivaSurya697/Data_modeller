@@ -6,8 +6,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from src.models.db import session_scope
-from src.models.tables import Domain, Entity
+from src.models.db import get_db
+from src.models.tables import Domain
 from src.services.validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/domains")
@@ -17,7 +17,7 @@ bp = Blueprint("domains", __name__, url_prefix="/domains")
 def index() -> str:
     """Display domains and their models."""
 
-    with session_scope() as session:
+    with get_db() as session:
         domains = list(
             session.execute(
                 select(Domain)
@@ -41,7 +41,7 @@ def create() -> str:
     name = payload.name.strip()
     description = payload.description.strip()
 
-    with session_scope() as session:
+    with get_db() as session:
         existing = session.execute(
             select(Domain).where(Domain.name == name)
         ).scalar_one_or_none()

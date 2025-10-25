@@ -6,12 +6,12 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-class SettingsInput(BaseModel):
-    """Validate persisted connection and LLM configuration."""
+class UserSettingsInput(BaseModel):
+    """Validate persisted user configuration."""
 
-    api_key: str | None = Field(default=None, max_length=4096)
-    base_url: str | None = Field(default=None, max_length=255)
-    model_name: str | None = Field(default=None, max_length=255)
+    openai_api_key: str = Field(min_length=1)
+    openai_base_url: str = Field(min_length=1, max_length=255)
+    rate_limit_per_minute: int = Field(gt=0)
 
 
 class DomainInput(BaseModel):

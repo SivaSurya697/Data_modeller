@@ -7,8 +7,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from src.models.db import session_scope
-from src.models.tables import Domain, Entity, ExportRecord, Relationship
+from src.models.db import get_db
+from src.models.tables import DataModel, ExportRecord
 from src.services.exporters.dictionary import export_dictionary
 from src.services.exporters.plantuml import export_plantuml
 from src.services.validators import ExportRequest
@@ -22,9 +22,9 @@ _EXPORTERS = {
 }
 
 
-def _load_domains() -> list[Domain]:
-    with session_scope() as session:
-        domains = list(
+def _load_models() -> list[DataModel]:
+    with get_db() as session:
+        models = list(
             session.execute(
                 select(Domain)
                 .options(joinedload(Domain.entities).joinedload(Entity.attributes))
@@ -38,8 +38,8 @@ def _load_domains() -> list[Domain]:
 def index() -> str:
     """List exports and available domains."""
 
-    domains = _load_domains()
-    with session_scope() as session:
+    models = _load_models()
+    with get_db() as session:
         exports = list(
             session.execute(
                 select(ExportRecord)
@@ -62,13 +62,11 @@ def create() -> str:
 
     exporter = _EXPORTERS[payload.exporter]
 
-    with session_scope() as session:
-        domain = session.execute(
-            select(Domain)
-            .options(joinedload(Domain.entities).joinedload(Entity.attributes))
-            .options(joinedload(Domain.relationships).joinedload(Relationship.from_entity))
-            .options(joinedload(Domain.relationships).joinedload(Relationship.to_entity))
-            .where(Domain.id == payload.domain_id)
+    with get_db() as session:
+        model = session.execute(
+            select(DataModel)
+            .options(joinedload(DataModel.domain))
+            .where(DataModel.id == payload.model_id)
         ).scalar_one_or_none()
         if domain is None:
             flash("Domain not found.", "error")
@@ -86,7 +84,7 @@ def create() -> str:
 def download(export_id: int) -> Response:
     """Download a generated export."""
 
-    with session_scope() as session:
+    with get_db() as session:
         record = session.get(ExportRecord, export_id)
         if record is None:
             flash("Export not found.", "error")

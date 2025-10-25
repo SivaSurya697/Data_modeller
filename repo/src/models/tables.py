@@ -3,26 +3,22 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-    func,
-)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.models.db import Base
 
 
-class Base(DeclarativeBase):
-    """Declarative base for ORM models."""
+class Settings(Base):
+    """Per-user application configuration stored securely."""
 
+    __tablename__ = "settings"
 
-class TimestampMixin:
-    """Shared timestamp columns for auditable tables."""
-
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    encrypted_openai_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    openai_base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -265,14 +261,15 @@ class ChangeSet(Base):
     __tablename__ = "change_sets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    domain_id: Mapped[int] = mapped_column(
-        ForeignKey("domains.id", ondelete="CASCADE"), nullable=False
-    )
-    author_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    data_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_models.id"), nullable=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="draft"
+    )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
