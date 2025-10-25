@@ -42,8 +42,8 @@
         <p class="form-help">Choose a table and provide sampled rows to calculate descriptive statistics.</p>
         <label for="profileTable">Table</label>
         <select id="profileTable" name="table_id">
-            {% if systems %}
-                {% for system in systems %}
+            {% if sources %}
+                {% for system in sources %}
                     {% for table in system.tables %}
                         <option value="{{ table.id }}">{{ system.name }} · {{ table.schema_name }}.{{ table.table_name }}</option>
                     {% endfor %}
@@ -67,8 +67,8 @@
 
 <section class="source-list">
     <h3>Registered sources</h3>
-    {% if systems %}
-        {% for system in systems %}
+    {% if sources %}
+        {% for system in sources %}
             <article class="source-system">
                 <header>
                     <h4>{{ system.name }}</h4>
