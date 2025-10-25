@@ -12,7 +12,16 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from src.api import changesets, domains, exports, model, relationships, settings
+from src.api import (
+    coverage,
+    changesets,
+    domains,
+    exports,
+    model,
+    quality,
+    relationships,
+    settings,
+)
 from src.api.sources import bp as sources_bp
 from src.models.db import create_all, init_engine, load_database_url, session_scope
 from src.models.tables import SourceTable
@@ -148,6 +157,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(relationships.bp)
     app.register_blueprint(changesets.bp)
     app.register_blueprint(coverage.bp)
+    app.register_blueprint(quality.bp)
     app.register_blueprint(exports.bp)
     app.register_blueprint(sources_bp, url_prefix="/api/sources")
 
