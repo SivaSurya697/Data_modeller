@@ -87,7 +87,7 @@ outputs/               # Generated export files
 - Run `python -m compileall .` to perform a lightweight syntax check across modules.
 - The OpenAI client is instantiated with `OpenAI(api_key=..., base_url=...)` to comply with enterprise gateway requirements.
 - Add new exporters in `src/services/exporters/` and register them in the exports blueprint.
-- The SQLAlchemy session helper in `src/models/db.py` provides a `session_scope()` context manager for transactional operations.
+- The SQLAlchemy session helper in `src/models/db.py` provides a `get_db()` context manager for transactional operations.
 
 ## Further reading
 

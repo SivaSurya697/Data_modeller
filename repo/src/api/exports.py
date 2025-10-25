@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from src.models.db import session_scope
+from src.models.db import get_db
 from src.models.tables import DataModel, ExportRecord
 from src.services.exporters.dictionary import export_dictionary
 from src.services.exporters.plantuml import export_plantuml
@@ -24,7 +24,7 @@ _EXPORTERS = {
 
 
 def _load_models() -> list[DataModel]:
-    with session_scope() as session:
+    with get_db() as session:
         models = list(
             session.execute(
                 select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
@@ -38,7 +38,7 @@ def index() -> str:
     """List exports and available models."""
 
     models = _load_models()
-    with session_scope() as session:
+    with get_db() as session:
         exports = list(
             session.execute(
                 select(ExportRecord)
@@ -61,7 +61,7 @@ def create() -> str:
 
     exporter = _EXPORTERS[payload.exporter]
 
-    with session_scope() as session:
+    with get_db() as session:
         model = session.execute(
             select(DataModel)
             .options(joinedload(DataModel.domain))
@@ -83,7 +83,7 @@ def create() -> str:
 def download(export_id: int) -> Response:
     """Download a generated export."""
 
-    with session_scope() as session:
+    with get_db() as session:
         record = session.get(ExportRecord, export_id)
         if record is None:
             flash("Export not found.", "error")

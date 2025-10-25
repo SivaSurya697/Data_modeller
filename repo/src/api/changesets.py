@@ -6,14 +6,9 @@ from http import HTTPStatus
 from flask import Blueprint, request
 from sqlalchemy import select
 
-from src.models.db import session_scope
-from src.models.tables import ChangeSet
-
-bp = Blueprint("changesets", __name__, url_prefix="/api/changesets")
-
-
-def _resolve_current_user() -> str:
-    """Resolve the current user from request headers."""
+from src.models.db import get_db
+from src.models.tables import ChangeSet, DataModel
+from src.services.validators import ChangeSetInput
 
     header_candidates = ("X-User", "X-User-Email", "X-User-Id")
     for header in header_candidates:
@@ -23,31 +18,47 @@ def _resolve_current_user() -> str:
     return "system"
 
 
-@bp.post("/")
-def create() -> tuple[dict[str, object], int]:
-    """Create a new change set in draft state."""
-
-    user = _resolve_current_user()
-    with session_scope() as session:
-        changeset = ChangeSet(title="Auto from draft", created_by=user, state="draft")
-        session.add(changeset)
-        session.flush()
-        payload = {"ok": True, "id": changeset.id}
-    return payload, HTTPStatus.CREATED
+def _load_models() -> list[DataModel]:
+    with get_db() as session:
+        models = list(
+            session.execute(
+                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
+            ).scalars()
+        )
+    return models
 
 
 @bp.get("/")
 def index() -> tuple[list[dict[str, object]], int]:
     """Return a list of change sets with minimal metadata."""
 
-    with session_scope() as session:
+    models = _load_models()
+    with get_db() as session:
         changesets = list(
             session.execute(
                 select(ChangeSet).order_by(ChangeSet.created_at.desc())
             ).scalars()
         )
-        payload = [
-            {"id": changeset.id, "title": changeset.title, "state": changeset.state}
-            for changeset in changesets
-        ]
-    return payload, HTTPStatus.OK
+    return render_template(
+        "changesets.html", models=models, changesets=changesets
+    )
+
+
+@bp.route("/", methods=["POST"])
+def create() -> str:
+    """Store a new changeset entry."""
+
+    try:
+        payload = ChangeSetInput(**request.form)
+    except ValidationError as exc:
+        flash(f"Invalid input: {exc}", "error")
+        return redirect(url_for("changesets.index"))
+
+    with get_db() as session:
+        model = session.get(DataModel, payload.model_id)
+        if model is None:
+            flash("Model not found.", "error")
+            return redirect(url_for("changesets.index"))
+        session.add(ChangeSet(model=model, description=payload.description.strip()))
+        flash("Changeset recorded.", "success")
+    return redirect(url_for("changesets.index"))
