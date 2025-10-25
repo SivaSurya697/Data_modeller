@@ -21,6 +21,7 @@ from src.api import (
     quality,
     settings,
 )
+from src.api.quality import bp as quality_bp
 from src.api.mappings import bp as mappings_bp
 from src.api.sources import bp as sources_bp
 from src.api.relationships import bp as relationships_bp
@@ -158,7 +159,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(relationships_bp, url_prefix="/api/relationships")
     app.register_blueprint(changesets.bp)
     app.register_blueprint(coverage.bp)
-    app.register_blueprint(quality.bp)
+    app.register_blueprint(quality_bp, url_prefix="/api/quality")
+    app.register_blueprint(quality.ui_bp)
 
     app.register_blueprint(exports.bp)
     app.register_blueprint(mappings_bp, url_prefix="/api/mappings")

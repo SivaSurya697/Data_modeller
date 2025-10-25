@@ -156,6 +156,28 @@
     {% endif %}
 </section>
 <section>
+    <h3>Quality</h3>
+    <p class="muted">Compute deterministic quality metrics for this domain.</p>
+    <button
+        type="button"
+        hx-get="/api/quality/summary?domain={{ draft.model.domain.name }}"
+        hx-swap="none"
+        hx-on::after-request="
+            const target = document.getElementById('quality-json');
+            if (!target) return;
+            try {
+                const payload = JSON.parse(event.detail.xhr.responseText);
+                target.textContent = JSON.stringify(payload.summary || payload, null, 2);
+            } catch (error) {
+                target.textContent = event.detail.xhr.responseText || 'Unable to parse response.';
+            }
+        "
+    >
+        Compute Quality
+    </button>
+    <pre id="quality-json" class="muted">Quality metrics will appear here.</pre>
+</section>
+<section>
     <h3>Impact Assessment</h3>
     {% if draft.impact %}
         <table class="impact-table">
