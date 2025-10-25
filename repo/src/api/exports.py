@@ -5,21 +5,34 @@ from pathlib import Path
 
 from flask import Blueprint, Response, flash, redirect, render_template, request, send_from_directory, url_for
 from pydantic import ValidationError
+from slugify import slugify
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
 from src.models.tables import DataModel, ExportRecord
+
 from src.services.exporters.dictionary import export_dictionary
-from src.services.exporters.plantuml import export_plantuml
+from src.services.exporters.plantuml import emit_plantuml
 from src.services.validators import ExportRequest
 
 bp = Blueprint("exports", __name__, url_prefix="/exports")
 
 _OUTPUT_DIR = Path(__file__).resolve().parents[2] / "outputs"
+
+
+def _export_plantuml(model: DataModel, output_dir: Path) -> Path:
+    """Wrapper around :func:`emit_plantuml` to keep exporter parity."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = output_dir / f"{slugify(model.name)}.puml"
+    emit_plantuml(model.definition, str(file_path))
+    return file_path
+
+
 _EXPORTERS = {
     "dictionary": export_dictionary,
-    "plantuml": export_plantuml,
+    "plantuml": _export_plantuml,
 }
 
 
