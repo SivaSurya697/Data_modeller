@@ -1,87 +1,79 @@
-"""Build compact JSON context for a domain."""
+"""Build prompt context for the modelling service."""
+
 from __future__ import annotations
 
-import json
-from typing import Any
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from src.models.tables import ChangeSet, DataModel, Domain
+from src.models.tables import ChangeSet, Domain, Entity, Relationship, Settings
 
 
 @dataclass(slots=True)
 class DomainContext:
-    """Container for context sent to the language model."""
+    """Container aggregating the state of a domain."""
 
     domain: Domain
     entities: list[Entity]
     relationships: list[Relationship]
-    settings: Setting | None
-    changes: list[ChangeSet]
+    settings: Settings | None
+    change_sets: list[ChangeSet]
 
     def to_prompt_sections(self) -> list[str]:
-        """Transform the context into textual sections."""
+        """Convert the context into human readable prompt sections."""
 
         sections: list[str] = [
-            f"Domain: {self.domain.name}\nDescription: {self.domain.description}"
+            f"Domain: {self.domain.name}\nDescription: {self.domain.description.strip()}"
         ]
+
         if self.settings:
-            details = list(
-                filter(
-                    None,
-                    [
-                        f"- Base URL: {self.settings.base_url}" if self.settings.base_url else None,
-                        f"- Model name: {self.settings.model_name}" if self.settings.model_name else None,
-                        "- API key configured" if self.settings.api_key_enc else None,
-                    ],
-                )
-            )
-            if not details:
-                details = ["- No overrides configured."]
+            details = [
+                f"- Base URL: {self.settings.openai_base_url}",
+                f"- Rate limit: {self.settings.rate_limit_per_minute} requests/minute",
+            ]
             sections.append("Operational Settings:\n" + "\n".join(details))
+
         if self.entities:
-            entity_lines: list[str] = []
+            entity_blocks: list[str] = []
             for entity in self.entities:
-                description = entity.description or "No description captured."
-                documentation = (entity.documentation or "").strip()
-                attribute_lines = [
-                    f"  - {attribute.name} ({attribute.data_type or 'unspecified'})"
-                    + (f" – {attribute.description}" if attribute.description else "")
-                    for attribute in entity.attributes
-                ]
-                block_parts = [
-                    f"Entity: {entity.name}",
-                    f"Description: {description}",
-                ]
-                if documentation:
-                    block_parts.append(f"Documentation:\n{documentation}")
-                if attribute_lines:
-                    block_parts.append("Attributes:\n" + "\n".join(attribute_lines))
-                entity_lines.append("\n".join(block_parts))
-            sections.append("Existing Entities:\n" + "\n\n".join(entity_lines))
+                lines = [f"Entity: {entity.name}"]
+                if entity.description:
+                    lines.append(f"Description: {entity.description.strip()}")
+                if entity.documentation:
+                    lines.append("Documentation:\n" + entity.documentation.strip())
+                if entity.attributes:
+                    attribute_lines = [
+                        "  - "
+                        + f"{attribute.name} ({attribute.data_type or 'unspecified'})"
+                        + (" – " + attribute.description.strip() if attribute.description else "")
+                        + (" [required]" if not attribute.is_nullable else "")
+                        for attribute in entity.attributes
+                    ]
+                    lines.append("Attributes:\n" + "\n".join(attribute_lines))
+                entity_blocks.append("\n".join(lines))
+            sections.append("Existing Entities:\n" + "\n\n".join(entity_blocks))
+
         if self.relationships:
             rel_lines = [
                 f"- {rel.from_entity.name} {rel.relationship_type} {rel.to_entity.name}"
-                + (f" – {rel.description}" if rel.description else "")
+                + (f" – {rel.description.strip()}" if rel.description else "")
                 for rel in self.relationships
             ]
             sections.append("Existing Relationships:\n" + "\n".join(rel_lines))
-        if self.changes:
-            change_lines: list[str] = []
-            for change in self.changes:
-                summary = change.title
-                if change.description:
-                    summary = f"{summary} — {change.description}"
-                change_lines.append(
-                    f"- {change.created_at:%Y-%m-%d} [{change.state}] {summary}"
-                )
-            sections.append(f"Recent Changes:\n" + "\n".join(change_lines))
+
+        if self.change_sets:
+            change_lines = [
+                f"- {change.created_at:%Y-%m-%d} {change.title} — {change.summary}"
+                for change in self.change_sets
+            ]
+            sections.append("Recent Change Sets:\n" + "\n".join(change_lines))
+
         return sections
 
 
 def load_context(session: Session, domain_id: int) -> DomainContext:
-    """Load all relevant context for a domain."""
+    """Load the aggregated context for a domain."""
 
     domain = session.execute(
         select(Domain)
@@ -98,13 +90,14 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
     entities = sorted(domain.entities, key=lambda item: item.name.lower())
     relationships = sorted(
         domain.relationships,
-        key=lambda rel: (rel.from_entity.name.lower(), rel.to_entity.name.lower(), rel.relationship_type),
+        key=lambda rel: (rel.from_entity.name.lower(), rel.to_entity.name.lower(), rel.relationship_type.lower()),
     )
-    settings: dict[str, str] = {}
-    changes = list(
+
+    settings = session.execute(select(Settings).limit(1)).scalar_one_or_none()
+    change_sets = list(
         session.execute(
             select(ChangeSet)
-            .where(ChangeSet.domain_id == domain_id)
+            .where(ChangeSet.domain_id == domain.id)
             .order_by(ChangeSet.created_at.desc())
         ).scalars()
     )
@@ -114,20 +107,29 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
         entities=entities,
         relationships=relationships,
         settings=settings,
-        changes=changes,
+        change_sets=change_sets,
     )
 
-    return attribute_dict
 
+def build_prompt(context: DomainContext, instructions: str | None) -> str:
+    """Generate the final prompt sent to the LLM."""
 
-    sections: list[str] = context.to_prompt_sections()
+    sections = context.to_prompt_sections()
     if instructions:
-        sections.append(f"Additional Instructions:\n{instructions.strip()}")
+        instructions_clean = instructions.strip()
+        if instructions_clean:
+            sections.append(f"Additional Instructions:\n{instructions_clean}")
     sections.append(
-        "Respond using JSON with a top-level 'entities' array. Each entity should"
-        " include 'name', optional 'description', optional 'documentation', and an"
-        " 'attributes' array with 'name', optional 'data_type', optional 'description',"
-        " and 'is_nullable'. Include optional 'relationships' linking entity names,"
-        " and a 'changes' array of review notes if applicable."
+        "Respond with JSON describing the proposed entities. The top-level "
+        "object must include an 'entities' array where each entry has "
+        "'name', optional 'description', optional 'documentation', and an "
+        "'attributes' array containing 'name', optional 'data_type', optional "
+        "'description', and 'is_nullable'. Optionally include a 'relationships' "
+        "array (with 'from', 'to', and 'type') and a 'changes' array with impact "
+        "notes for reviewers."
     )
     return "\n\n".join(sections)
+
+
+__all__ = ["DomainContext", "build_prompt", "load_context"]
+

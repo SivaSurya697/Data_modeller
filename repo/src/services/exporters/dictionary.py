@@ -1,17 +1,15 @@
-"""Render a markdown data dictionary from a JSON model payload."""
+"""Markdown dictionary exporter."""
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Mapping
 
+from slugify import slugify
 
 from src.models.tables import Domain, Entity
 
 
 def _render_entity(entity: Entity) -> list[str]:
-    """Render an entity section for the data dictionary."""
-
     lines = [f"### {entity.name}\n"]
     if entity.description:
         lines.append(f"{entity.description}\n\n")
@@ -32,7 +30,7 @@ def _render_entity(entity: Entity) -> list[str]:
 
 
 def export_dictionary(domain: Domain, output_dir: Path) -> Path:
-    """Write a markdown data dictionary for a domain."""
+    """Write a markdown data dictionary for ``domain``."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"{slugify(domain.name)}-dictionary.md"
@@ -52,35 +50,5 @@ def export_dictionary(domain: Domain, output_dir: Path) -> Path:
     return file_path
 
 
-def export_dictionary(model: "DataModel", output_dir: Path) -> Path:  # pragma: no cover - legacy shim
-    """Backward compatible wrapper for existing callers expecting ORM models."""
+__all__ = ["export_dictionary"]
 
-    payload = {
-        "name": model.name,
-        "summary": model.summary,
-        "definition": model.definition,
-        "domain": {"name": model.domain.name if model.domain else None},
-    }
-    return emit_dictionary_md(payload, output_dir)
-
-
-def _extract_name(model: Mapping[str, Any]) -> str:
-    value = str(model.get("name") or "Model").strip()
-    return value or "Model"
-
-
-def _extract_domain_name(model: Mapping[str, Any]) -> str:
-    domain = model.get("domain")
-    if isinstance(domain, Mapping):
-        raw = domain.get("name")
-    else:
-        raw = model.get("domain_name")
-    return str(raw).strip() if raw else ""
-
-
-def _slug(value: str) -> str:
-    slug = slugify(value)
-    return slug or "model"
-
-
-from src.models.tables import DataModel  # noqa: E402  # isort:skip

@@ -1,9 +1,10 @@
-"""Model definition validation helpers."""
+"""Pydantic models shared across blueprints."""
+
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserSettingsInput(BaseModel):
@@ -29,7 +30,7 @@ class DraftRequest(BaseModel):
 
 
 class ChangeSetInput(BaseModel):
-    """Validate changeset form submissions."""
+    """Validate change-set submissions."""
 
     domain_id: int
     title: str = Field(min_length=1, max_length=255)
@@ -37,7 +38,7 @@ class ChangeSetInput(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    """Validate export request input."""
+    """Validate export requests."""
 
     domain_id: int
     exporter: str
@@ -52,3 +53,13 @@ class ExportRequest(BaseModel):
         if value not in allowed:
             raise ValueError("Unsupported exporter requested")
         return value
+
+
+__all__ = [
+    "ChangeSetInput",
+    "DomainInput",
+    "DraftRequest",
+    "ExportRequest",
+    "UserSettingsInput",
+]
+
