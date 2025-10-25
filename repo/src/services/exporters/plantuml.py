@@ -1,10 +1,11 @@
-"""Create PlantUML diagrams from model definitions."""
+"""Emit PlantUML diagrams from JSON model definitions."""
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from slugify import slugify
 
 from src.models.tables import Domain, Entity
 
