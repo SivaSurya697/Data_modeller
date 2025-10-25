@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from typing import Any, Mapping
 
-from flask import Blueprint, jsonify, render_template, request
-from pydantic import ValidationError
+from flask import Blueprint, jsonify, request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.db import get_db
 from src.models.tables import SourceSystem, SourceTable
-from src.services.profiler import merge_statistics, summarise_preview
 
 bp = Blueprint("sources_api", __name__)
-ui_bp = Blueprint("sources", __name__, url_prefix="/sources")
 
 _DEFAULT_SYSTEM_NAME = "default"
 _DEFAULT_CONNECTION_TYPE = "external"
@@ -77,6 +76,40 @@ def _find_table_by_name(session: Session, name: str) -> SourceTable | None:
         .where(SourceTable.table_name == table_name)
     )
     return session.execute(stmt).scalar_one_or_none()
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _profile_preview(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Return profiling statistics for preview rows."""
+
+    column_names = sorted({key for row in rows for key in row})
+    columns: dict[str, Any] = {}
+    for name in column_names:
+        values = [row.get(name) for row in rows]
+        non_null = [value for value in values if value is not None]
+        stats = {
+            "total": len(values),
+            "null_count": len(values) - len(non_null),
+            "distinct_count": len({json.dumps(value, sort_keys=True) for value in non_null}),
+        }
+        if non_null:
+            stats["examples"] = non_null[:5]
+        columns[name] = {"statistics": stats}
+    return {
+        "columns": columns,
+        "sampled_row_count": len(rows),
+    }
 
 
 @bp.get("/")
@@ -143,7 +176,7 @@ def import_sources():
         serialised: list[dict[str, Any]] = []
 
         for entry in sources:
-            if not isinstance(entry, dict):
+            if not isinstance(entry, Mapping):
                 return jsonify({"error": "Each source entry must be an object."}), 400
 
             name = entry.get("name")
@@ -187,26 +220,14 @@ def import_sources():
                 changed = True
 
             stats = entry.get("stats") or entry.get("statistics")
-            if stats is not None:
-                if table.table_statistics is None:
-                    table.table_statistics = stats
-                    changed = True
-                else:
-                    merged = merge_statistics(table.table_statistics, stats)
-                    if merged != table.table_statistics:
-                        table.table_statistics = merged
-                        changed = True
+            if stats is not None and table.table_statistics != stats:
+                table.table_statistics = stats
+                changed = True
 
             if "row_count" in entry:
                 row_count = entry.get("row_count")
                 if table.row_count != row_count:
                     table.row_count = row_count
-                    changed = True
-
-            if "profiled_at" in entry and entry.get("profiled_at"):
-                profiled_at = _parse_datetime(entry.get("profiled_at"))
-                if profiled_at and table.profiled_at != profiled_at:
-                    table.profiled_at = profiled_at
                     changed = True
 
             if "sampled_row_count" in entry:
@@ -215,26 +236,16 @@ def import_sources():
                     table.sampled_row_count = sampled
                     changed = True
 
-            if table.table_statistics is not None:
-                if table.row_count is None:
-                    maybe_row_count = table.table_statistics.get("row_count")
-                    if maybe_row_count is not None and table.row_count != maybe_row_count:
-                        table.row_count = maybe_row_count
-                        changed = True
-                if table.sampled_row_count is None:
-                    sampled_value = table.table_statistics.get("sampled_row_count")
-                    if sampled_value is not None and table.sampled_row_count != sampled_value:
-                        table.sampled_row_count = sampled_value
-                        changed = True
-                if table.profiled_at is None:
-                    profiled_value = table.table_statistics.get("profiled_at")
-                    profiled_at = _parse_datetime(profiled_value)
-                    if profiled_at and table.profiled_at != profiled_at:
-                        table.profiled_at = profiled_at
-                        changed = True
+            if "profiled_at" in entry and entry.get("profiled_at"):
+                profiled_at = _parse_datetime(entry.get("profiled_at"))
+                if profiled_at and table.profiled_at != profiled_at:
+                    table.profiled_at = profiled_at
+                    changed = True
 
             if table.schema_definition is None:
                 table.schema_definition = {}
+            if table.table_statistics is None:
+                table.table_statistics = {}
 
             if is_new:
                 created += 1
@@ -267,71 +278,40 @@ def profile_source():
     if payload is None:
         return jsonify({"error": "Request body must be JSON."}), 400
 
-    if "table_id" in payload:
-        try:
-            payload["table_id"] = int(payload["table_id"])
-        except (TypeError, ValueError):
-            return jsonify({"error": "table_id must be an integer"}), 400
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({"error": "Profile payload must include a table name."}), 400
 
-    if isinstance(payload.get("samples"), str):
-        try:
-            payload["samples"] = json.loads(payload["samples"])
-        except json.JSONDecodeError:
-            return jsonify({"error": "samples must be valid JSON"}), 400
-
-    if isinstance(payload.get("total_rows"), str) and payload["total_rows"] != "":
-        try:
-            payload["total_rows"] = int(payload["total_rows"])
-        except ValueError:
-            return jsonify({"error": "total_rows must be an integer"}), 400
+    preview_rows = payload.get("preview_rows") or payload.get("rows") or []
+    if not isinstance(preview_rows, list):
+        return jsonify({"error": "preview_rows must be a list"}), 400
 
     try:
-        request_model = SourceProfileRequest(**payload)
-    except ValidationError as exc:
-        if not payload.get("samples"):
-            table_id = payload.get("table_id")
-            if table_id is None:
-                return jsonify({"error": exc.errors()}), 400
+        with get_db() as session:
+            table = _find_table_by_name(session, name)
+            if table is None:
+                return jsonify({"error": f"Source '{name}' was not found."}), 404
 
-            with get_db() as session:
-                stmt = (
-                    select(SourceTable)
-                    .options(joinedload(SourceTable.columns))
-                    .where(SourceTable.id == table_id)
-                )
-                result = session.execute(stmt).unique().scalar_one_or_none()
-                if result is None:
-                    return jsonify({"error": f"Source table {table_id} was not found"}), 404
-            return jsonify(_serialize_table(result)), 200
-
-        return jsonify({"error": exc.errors()}), 400
-
-            preview = summarise_preview(rows)
-            profiled_at = _parse_datetime(preview.get("profiled_at")) or datetime.now(
-                timezone.utc
-            )
-
-            table.sampled_row_count = preview["sampled_row_count"]
+            profiled_at = datetime.now(timezone.utc)
             table.profiled_at = profiled_at
-            if total_rows is not None:
-                table.row_count = total_rows
+            table.sampled_row_count = len(preview_rows)
 
-            stats_update: dict[str, Any] = {
-                "profiled_at": preview["profiled_at"],
-                "sampled_row_count": preview["sampled_row_count"],
-                "columns": preview.get("columns", {}),
-                "preview_rows": preview.get("preview_rows"),
-            }
-            if total_rows is not None:
-                stats_update["row_count"] = total_rows
-            elif table.row_count is not None:
+            row_count = payload.get("row_count")
+            if isinstance(row_count, int) or isinstance(row_count, float):
+                table.row_count = int(row_count)
+
+            stats_update = _profile_preview(preview_rows)
+            stats_update["profiled_at"] = profiled_at.isoformat()
+            if table.row_count is not None:
                 stats_update["row_count"] = table.row_count
 
-            table.table_statistics = merge_statistics(table.table_statistics, stats_update)
+            table.table_statistics = stats_update
 
-    with get_db() as session:
-        systems = _service.list_systems(session)
-    return render_template("sources.html", sources=systems)
+            serialised = _serialise_table(table)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"source": serialised})
 
 
 __all__ = ["bp"]

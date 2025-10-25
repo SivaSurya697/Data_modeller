@@ -63,6 +63,13 @@ class LLMClient:
 
         return payload, amended_payload
 
+    def json_chat_complete(
+        self, messages: Sequence[Mapping[str, Any]]
+    ) -> Mapping[str, Any]:
+        """Return the parsed JSON payload from an arbitrary chat prompt."""
+
+        return self._parse_json_payload(self._chat_complete(messages))
+
     @staticmethod
     def _sanitize_response(response_text: str) -> str:
         """Return JSON content without code fences or leading labels."""
