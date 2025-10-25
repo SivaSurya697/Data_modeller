@@ -3,16 +3,19 @@
 {% block content %}
 <h2>Changesets</h2>
 <form method="post">
-    <label for="model_id">Model</label>
-    <select id="model_id" name="model_id" required>
-        <option value="" disabled selected>Select a model</option>
-        {% for model in models %}
-            <option value="{{ model.id }}">{{ model.name }} ({{ model.domain.name }})</option>
+    <label for="domain_id">Domain</label>
+    <select id="domain_id" name="domain_id" required>
+        <option value="" disabled selected>Select a domain</option>
+        {% for domain in domains %}
+            <option value="{{ domain.id }}">{{ domain.name }}</option>
         {% endfor %}
     </select>
 
-    <label for="description">Change summary</label>
-    <textarea id="description" name="description" rows="4" required></textarea>
+    <label for="title">Title</label>
+    <input id="title" name="title" type="text" required>
+
+    <label for="summary">Summary</label>
+    <textarea id="summary" name="summary" rows="4" required></textarea>
     <button type="submit">Record Change</button>
 </form>
 
@@ -20,16 +23,18 @@
 <table class="table">
     <thead>
     <tr>
-        <th>Model</th>
-        <th>Description</th>
+        <th>Domain</th>
+        <th>Title</th>
+        <th>Summary</th>
         <th>Created</th>
     </tr>
     </thead>
     <tbody>
     {% for item in changesets %}
         <tr>
-            <td>{{ item.model.name }}</td>
-            <td>{{ item.description }}</td>
+            <td>{{ item.domain.name }}</td>
+            <td>{{ item.title }}</td>
+            <td>{{ item.summary }}</td>
             <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
         </tr>
     {% endfor %}

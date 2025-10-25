@@ -1,117 +1,73 @@
-"""Model drafting endpoints."""
+"""REST endpoints for model drafting operations."""
 from __future__ import annotations
 
-import json
+from typing import Any
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from pydantic import ValidationError
-from sqlalchemy import select
+from flask import Blueprint, current_app, jsonify, request
+from flask.typing import ResponseReturnValue
 
-from src.models.db import session_scope
-from src.models.tables import Domain, DataModel
-from src.services.context_builder import load_context
-from src.services.impact import evaluate_model_impact
-from src.services.llm_modeler import draft_fresh
-from src.services.settings import load_settings
+from src.models.db import get_db
+from src.models.tables import Domain
+from src.services.llm_modeler import ModelingService
 from src.services.validators import DraftRequest
 
-bp = Blueprint("modeler", __name__, url_prefix="/modeler")
+bp = Blueprint("model", __name__, url_prefix="/api/model")
 
 
 def _load_domains() -> list[Domain]:
-    with session_scope() as session:
+    with get_db() as session:
         domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
     return domains
 
+    payload = request.get_json(silent=True) or {}
+    raw_domain = payload.get("domain")
+    if not isinstance(raw_domain, str) or not raw_domain.strip():
+        return jsonify({"error": "Field 'domain' is required."}), 400
 
-@bp.route("/", methods=["GET"])
-def draft_review() -> str:
-    """Render the draft review screen."""
-
-    domains = _load_domains()
-    return render_template("draft_review.html", domains=domains, draft=None)
-
-
-@bp.route("/", methods=["POST"])
-def generate_draft() -> str:
-    """Generate a model draft using the LLM."""
-
-    try:
-        payload = DraftRequest(**request.form)
-    except ValidationError as exc:
-        flash(f"Invalid input: {exc}", "error")
-        return redirect(url_for("modeler.draft_review"))
-
+    domain_name = raw_domain.strip()
     settings = load_settings()
 
     try:
         with session_scope() as session:
-            context = load_context(session, payload.domain_id)
-            prior_snippets = [
-                f"{model.name}\nSummary: {model.summary}\nDefinition:\n{model.definition}"
-                for model in context.models
-            ]
-            source_summaries: list[str] = []
-            if context.settings:
-                setting_lines = "\n".join(
-                    f"{key}: {value}" for key, value in sorted(context.settings.items())
-                )
-                source_summaries.append(f"Operational Settings\n{setting_lines}")
-            if context.changes:
-                change_lines = "\n".join(
-                    f"{change.created_at:%Y-%m-%d}: {change.description}"
-                    for change in context.changes
-                )
-                source_summaries.append(f"Recent Changes\n{change_lines}")
+            context = compact_prior_context(session, domain_name)
+            prior_snippets = context.prior_snippets()
+            source_summary = context.source_summary()
 
-            response_json = draft_fresh(
-                settings,
-                request=(
-                    f"Draft a refined data model for the {context.domain.name} domain. "
-                    "Return JSON with name, summary, definition, and optional changes."
-                ),
-                domain_summary=context.domain.description or "",
-                prior_snippets=prior_snippets,
-                source_summaries=source_summaries,
-                instructions=payload.instructions,
-            )
-
-            try:
-                payload_data = json.loads(response_json or "{}")
-            except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-                raise ValueError("Model response was not valid JSON") from exc
-
-            name = str(payload_data.get("name") or f"{context.domain.name} Model")
-            summary = str(
-                payload_data.get("summary") or "Model summary pending review."
-            )
-            definition = str(payload_data.get("definition") or "").strip()
-            if not definition:
-                raise ValueError("Model definition missing from LLM response")
-
-            model = DataModel(
+            draft_result = draft_fresh(
+                session=session,
+                settings=settings,
                 domain=context.domain,
-                name=name.strip(),
-                summary=summary.strip(),
-                definition=definition,
-                instructions=(payload.instructions or "").strip() or None,
+                prior_snippets=prior_snippets,
+                source_summary=source_summary,
             )
-            session.add(model)
-            session.flush()
 
-            change_hints_raw = payload_data.get("changes")
-            if isinstance(change_hints_raw, str):
-                change_hints = [change_hints_raw]
-            elif isinstance(change_hints_raw, list):
-                change_hints = [str(item) for item in change_hints_raw]
-            else:
-                change_hints = None
+        response_body: dict[str, Any] = {
+            "model_json": draft_result.model_json,
+            "qa": draft_result.qa,
+            "context_used": {
+                "prior_snippets": prior_snippets,
+                "source_summary": source_summary,
+            },
+        }
+        return jsonify(response_body)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except NotImplementedError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - unexpected failures logged
+        current_app.logger.exception("Model draft generation failed", exc_info=exc)
+        return jsonify({"error": str(exc)}), 400
 
-            impact = evaluate_model_impact(context.models, model.definition, change_hints)
+
+    service = ModelingService()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        with get_db() as session:
+            result = service.generate_draft(session, payload)
             draft = {
-                "summary": model.summary,
-                "definition": model.definition,
-                "impact": impact,
+                "entities": result.entities,
+                "impact": result.impact,
             }
     except Exception as exc:
         flash(f"Draft generation failed: {exc}", "error")
