@@ -18,7 +18,6 @@
         <th>Description</th>
         <th>Entities</th>
         <th>Review tasks</th>
-        <th>Publishing</th>
     </tr>
     </thead>
     <tbody>
@@ -52,60 +51,6 @@
                     No review tasks generated.
                 {% endif %}
             </td>
-            <td class="publish-cell">
-                {% set state = publish_states.get(domain.id) %}
-                <div class="publish-summary">
-                    {% if domain.published_models %}
-                        {% set latest = domain.published_models[-1] %}
-                        <div class="publish-latest">Latest tag: <strong>{{ latest.version_tag }}</strong></div>
-                    {% else %}
-                        <div class="publish-latest">No published versions</div>
-                    {% endif %}
-                </div>
-                <button type="button" class="publish-trigger" data-target="publish-modal-{{ domain.id }}">
-                    Review &amp; Publish
-                </button>
-                <dialog id="publish-modal-{{ domain.id }}" class="publish-modal">
-                    <form method="dialog" class="publish-form" data-domain-id="{{ domain.id }}">
-                        <h3>Publish {{ domain.name }}</h3>
-                        <p class="publish-intro">Review quality gates and confirm a version tag.</p>
-                        <label for="version-tag-{{ domain.id }}">Version tag</label>
-                        <input id="version-tag-{{ domain.id }}" name="version_tag" type="text" value="{{ state.suggested_tag if state else '' }}" required>
-                        <section class="quality-gates">
-                            <h4>Quality Gates</h4>
-                            {% if state %}
-                                <ul>
-                                    {% for gate in state.gates %}
-                                        <li class="quality-gate {{ 'passed' if gate.passed else 'blocked' }}">
-                                            <div class="quality-gate-header">
-                                                <span class="gate-name">{{ gate.name }}</span>
-                                                <span class="gate-status">{% if gate.passed %}✅ Passed{% else %}❌ Blocked{% endif %}</span>
-                                            </div>
-                                            {% if gate.blockers %}
-                                                <ul class="gate-blockers">
-                                                    {% for blocker in gate.blockers %}
-                                                        <li>{{ blocker }}</li>
-                                                    {% endfor %}
-                                                </ul>
-                                            {% endif %}
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <p>No evaluation available.</p>
-                            {% endif %}
-                        </section>
-                        <p class="publish-warning" {% if state and state.is_ready %}hidden{% endif %}>
-                            Resolve all blockers before publishing.
-                        </p>
-                        <div class="publish-feedback" hidden></div>
-                        <menu>
-                            <button type="reset" value="cancel">Cancel</button>
-                            <button type="submit" data-action="publish" {% if not (state and state.is_ready) %}disabled{% endif %}>Publish</button>
-                        </menu>
-                    </form>
-                </dialog>
-            </td>
         </tr>
     {% endfor %}
     </tbody>
@@ -113,87 +58,4 @@
 {% else %}
 <p>No domains defined.</p>
 {% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const endpoint = "{{ url_for('model_api.publish_model') }}";
-    document.querySelectorAll('.publish-trigger').forEach((button) => {
-        const dialog = document.getElementById(button.dataset.target);
-        if (!dialog) {
-            return;
-        }
-        const form = dialog.querySelector('.publish-form');
-        const feedback = dialog.querySelector('.publish-feedback');
-        const warning = dialog.querySelector('.publish-warning');
-        const submitButton = form.querySelector('[data-action="publish"]');
-        submitButton.dataset.initialDisabled = String(submitButton.disabled);
-
-        button.addEventListener('click', () => {
-            dialog.showModal();
-        });
-
-        dialog.addEventListener('close', () => {
-            const initialDisabled = submitButton.dataset.initialDisabled === 'true';
-            submitButton.disabled = initialDisabled;
-            feedback.hidden = true;
-            feedback.textContent = '';
-            if (warning) {
-                if (submitButton.disabled) {
-                    warning.removeAttribute('hidden');
-                } else {
-                    warning.setAttribute('hidden', '');
-                }
-            }
-        });
-
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            if (submitButton.disabled) {
-                return;
-            }
-            const versionInput = form.querySelector('input[name="version_tag"]');
-            const versionTag = versionInput.value.trim();
-            if (!versionTag) {
-                feedback.hidden = false;
-                feedback.textContent = 'Version tag is required.';
-                return;
-            }
-            submitButton.disabled = true;
-            feedback.hidden = false;
-            feedback.textContent = 'Publishing…';
-
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        domain_id: Number(form.dataset.domainId),
-                        version_tag: versionTag,
-                    }),
-                });
-
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    submitButton.disabled = false;
-                    feedback.textContent = payload.message || 'Publication failed quality gates.';
-                    if (payload.preview && payload.preview.gates) {
-                        window.location.reload();
-                    }
-                    return;
-                }
-
-                feedback.textContent = 'Publish succeeded. Refreshing…';
-                window.setTimeout(() => window.location.reload(), 800);
-            } catch (error) {
-                submitButton.disabled = false;
-                feedback.textContent = 'Failed to publish: ' + error;
-            }
-        });
-    });
-});
-</script>
 {% endblock %}

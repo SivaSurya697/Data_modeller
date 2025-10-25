@@ -80,12 +80,6 @@ class Domain(Base, TimestampMixin):
     exports: Mapped[list["ExportRecord"]] = relationship(
         "ExportRecord", back_populates="domain", cascade="all, delete-orphan"
     )
-    published_models: Mapped[list["PublishedModel"]] = relationship(
-        "PublishedModel",
-        back_populates="domain",
-        cascade="all, delete-orphan",
-        order_by="PublishedModel.created_at",
-    )
     created_review_tasks: Mapped[list["ReviewTask"]] = relationship(
         "ReviewTask",
         back_populates="source_domain",
@@ -119,11 +113,6 @@ class DataModel(Base, TimestampMixin):
     )
 
     domain: Mapped[Domain] = relationship("Domain", back_populates="models")
-    publications: Mapped[list["PublishedModel"]] = relationship(
-        "PublishedModel",
-        back_populates="model",
-        cascade="all, delete-orphan",
-    )
 
 
 class EntityRole(str, Enum):

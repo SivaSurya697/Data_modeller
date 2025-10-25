@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import get_db
-from src.models.tables import Domain, Entity, PublishedModel, Relationship, ReviewTask
+from src.models.tables import Domain, Entity, ReviewTask
 from src.services.impact_cross_domain import identify_impacted_domains
-from src.services.publish import PublishService
 from src.services.validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/domains")
@@ -24,15 +21,7 @@ def _load_domains() -> list[Domain]:
             select(Domain)
             .options(
                 joinedload(Domain.entities).joinedload(Entity.attributes),
-                joinedload(Domain.models),
                 joinedload(Domain.created_review_tasks).joinedload(ReviewTask.target_domain),
-                joinedload(Domain.relationships)
-                .joinedload(Relationship.from_entity)
-                .joinedload(Entity.attributes),
-                joinedload(Domain.relationships)
-                .joinedload(Relationship.to_entity)
-                .joinedload(Entity.attributes),
-                joinedload(Domain.published_models).joinedload(PublishedModel.model),
             )
             .order_by(Domain.name)
         )
@@ -95,14 +84,5 @@ def index():
         return redirect(url_for("domains.index"))
 
     domains = _load_domains()
-    artifacts_dir = Path(current_app.config["ARTIFACTS_DIR"])
-    publish_service = PublishService(artifacts_dir)
-    publish_states = {
-        domain.id: publish_service.preview(domain).to_dict() for domain in domains
-    }
-    return render_template(
-        "domains.html",
-        domains=domains,
-        publish_states=publish_states,
-    )
+    return render_template("domains.html", domains=domains)
 
