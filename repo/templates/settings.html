@@ -11,32 +11,20 @@
 
 <h3>Persisted Settings</h3>
 <form method="post">
-    <label for="key">Key</label>
-    <input id="key" name="key" type="text" required>
-    <label for="value">Value</label>
-    <textarea id="value" name="value" rows="3" required></textarea>
-    <button type="submit">Save Setting</button>
+    <label for="api_key">OpenAI API key</label>
+    <input id="api_key" name="api_key" type="text" value="{{ setting.api_key_enc if setting else '' }}">
+
+    <label for="base_url">Base URL</label>
+    <input id="base_url" name="base_url" type="text" value="{{ setting.base_url if setting else '' }}">
+
+    <label for="model_name">Model name</label>
+    <input id="model_name" name="model_name" type="text" value="{{ setting.model_name if setting else '' }}">
+
+    <button type="submit">Save Settings</button>
 </form>
 
-{% if settings %}
-<table class="table">
-    <thead>
-    <tr>
-        <th>Key</th>
-        <th>Value</th>
-        <th>Updated</th>
-    </tr>
-    </thead>
-    <tbody>
-    {% for item in settings %}
-        <tr>
-            <td><code>{{ item.key }}</code></td>
-            <td>{{ item.value }}</td>
-            <td>{{ item.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+{% if setting %}
+<p><strong>Last updated:</strong> {{ setting.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
 {% else %}
 <p>No settings stored yet.</p>
 {% endif %}

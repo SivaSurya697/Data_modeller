@@ -45,8 +45,7 @@ def generate_draft() -> str:
         with session_scope() as session:
             result = service.generate_draft(session, payload)
             draft = {
-                "summary": result.model.summary,
-                "definition": result.model.definition,
+                "entities": result.entities,
                 "impact": result.impact,
             }
     except Exception as exc:

@@ -34,10 +34,16 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 The ORM models in `src/models/tables.py` define the storage schema:
 
-- `Setting` – key/value configuration overrides persisted in the database.
-- `Domain` – group of related data models.
-- `DataModel` – individual model drafts, including summary, markdown definition, and optional instructions.
-- `ChangeSet` – human-authored change notes tied to a `DataModel`.
+- `User` – optional owner for domains and change sets.
+- `Setting` – persisted OpenAI connection settings (`api_key_enc`, `base_url`, `model_name`).
+- `Domain` – groups entities, relationships, mappings, and change history.
+- `Entity` – conceptual datasets belonging to a domain, including free-form documentation.
+- `Attribute` – entity fields with data type, nullability, and descriptive metadata.
+- `Relationship` – directed associations between entities.
+- `SourceTable` – source-system tables available for lineage mapping.
+- `Mapping` – attribute-to-source column transformations.
+- `ChangeSet` – curated change summaries tied to a domain.
+- `ChangeItem` – optional fine-grained change entries linked to entities or attributes.
 - `ExportRecord` – file metadata produced by exporters.
 
 `src/models/db.py` provides:
@@ -54,19 +60,19 @@ The ORM models in `src/models/tables.py` define the storage schema:
 
 ### Prompt context (`src/services/context_builder.py`)
 
-- `load_context(session, domain_id)` loads the target domain, latest models, change sets, and settings.
+- `load_context(session, domain_id)` loads the target domain, existing entities, relationships, change sets, and settings.
 - `DomainContext.to_prompt_sections()` compiles human-readable sections for prompts.
-- `build_prompt()` assembles the final prompt, optionally adding user instructions and requesting a JSON response.
+- `build_prompt()` assembles the final prompt, optionally adding user instructions and requesting a JSON response describing entities, attributes, and relationships.
 
 ### LLM orchestration (`src/services/llm_client.py` and `src/services/llm_modeler.py`)
 
 - `LLMClient` wraps the OpenAI Chat Completions client. It always instantiates the SDK as `OpenAI(api_key=..., base_url=...)` to support custom gateways.
-- `ModelingService.generate_draft()` orchestrates context loading, prompt construction, LLM invocation, ORM persistence, and impact analysis.
-- `DraftResult` bundles the stored model and review notes for the blueprint.
+- `ModelingService.generate_draft()` orchestrates context loading, prompt construction, LLM invocation, ORM persistence of entities/relationships, and impact analysis.
+- `DraftResult` bundles the stored entities and review notes for the blueprint.
 
 ### Impact analysis (`src/services/impact.py`)
 
-Calculates a diff between the latest existing model definition and the newly generated one, optionally seeded with change hints returned from the LLM.
+Calculates a diff between the latest existing entities and the newly generated ones, optionally seeded with change hints returned from the LLM.
 
 ### Validation (`src/services/validators.py`)
 
@@ -74,10 +80,10 @@ Pydantic models validate form submissions for settings, domains, and draft reque
 
 ### Exporters (`src/services/exporters/`)
 
-Each exporter accepts a `DataModel` instance and writes artifacts to the `outputs/` directory:
+Each exporter accepts a `Domain` instance and writes artifacts to the `outputs/` directory:
 
-- `dictionary.export_dictionary()` – generates a Markdown data dictionary summarising the model.
-- `plantuml.export_plantuml()` – produces a PlantUML class diagram stub annotated with the model definition.
+- `dictionary.export_dictionary()` – generates a Markdown data dictionary summarising entities and attributes.
+- `plantuml.export_plantuml()` – produces a PlantUML class diagram derived from the captured entities and relationships.
 
 New exporters can be added by following the same signature and registering them in `src/api/exports.py`.
 
@@ -85,13 +91,13 @@ New exporters can be added by following the same signature and registering them 
 
 1. A user submits the draft form from `templates/draft_review.html` handled by `src/api/model.py`.
 2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `session_scope()`.
-3. `ModelingService.generate_draft()` loads domain context, builds a prompt, invokes the OpenAI client, persists the new `DataModel`, and evaluates impact.
+3. `ModelingService.generate_draft()` loads domain context, builds a prompt, invokes the OpenAI client, persists the new entities/relationships, and evaluates impact.
 4. The blueprint commits the transaction, flashes a success message, and renders the updated draft alongside impact highlights.
 
 ## Request flow example: exporting artifacts
 
 1. The user selects an exporter on the Exports page (`src/api/exports.py`).
-2. The blueprint loads the `DataModel`, resolves the requested exporter function, and passes the configured `outputs/` directory.
+2. The blueprint loads the `Domain`, resolves the requested exporter function, and passes the configured `outputs/` directory.
 3. The exporter writes the artifact to disk and `ExportRecord` captures metadata for the UI.
 4. The page refreshes with the updated export list and filesystem links.
 

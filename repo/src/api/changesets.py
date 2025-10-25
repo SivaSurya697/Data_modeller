@@ -7,37 +7,35 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
-from src.models.tables import ChangeSet, DataModel
+from src.models.tables import ChangeSet, Domain
 from src.services.validators import ChangeSetInput
 
 bp = Blueprint("changesets", __name__, url_prefix="/changesets")
 
 
-def _load_models() -> list[DataModel]:
+def _load_domains() -> list[Domain]:
     with session_scope() as session:
-        models = list(
-            session.execute(
-                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
-            ).scalars()
+        domains = list(
+            session.execute(select(Domain).order_by(Domain.name)).scalars()
         )
-    return models
+    return domains
 
 
 @bp.route("/", methods=["GET"])
 def index() -> str:
     """List changesets and provide creation form."""
 
-    models = _load_models()
+    domains = _load_domains()
     with session_scope() as session:
         changesets = list(
             session.execute(
                 select(ChangeSet)
-                .options(joinedload(ChangeSet.model).joinedload(DataModel.domain))
+                .options(joinedload(ChangeSet.domain))
                 .order_by(ChangeSet.created_at.desc())
             ).scalars()
         )
     return render_template(
-        "changesets.html", models=models, changesets=changesets
+        "changesets.html", domains=domains, changesets=changesets
     )
 
 
@@ -52,10 +50,16 @@ def create() -> str:
         return redirect(url_for("changesets.index"))
 
     with session_scope() as session:
-        model = session.get(DataModel, payload.model_id)
-        if model is None:
-            flash("Model not found.", "error")
+        domain = session.get(Domain, payload.domain_id)
+        if domain is None:
+            flash("Domain not found.", "error")
             return redirect(url_for("changesets.index"))
-        session.add(ChangeSet(model=model, description=payload.description.strip()))
+        session.add(
+            ChangeSet(
+                domain=domain,
+                title=payload.title.strip(),
+                summary=payload.summary.strip(),
+            )
+        )
         flash("Changeset recorded.", "success")
     return redirect(url_for("changesets.index"))

@@ -1,4 +1,3 @@
-"""Model export endpoints."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
-from src.models.tables import DataModel, ExportRecord
+from src.models.tables import Domain, Entity, ExportRecord, Relationship
 from src.services.exporters.dictionary import export_dictionary
 from src.services.exporters.plantuml import export_plantuml
 from src.services.validators import ExportRequest
@@ -23,30 +22,32 @@ _EXPORTERS = {
 }
 
 
-def _load_models() -> list[DataModel]:
+def _load_domains() -> list[Domain]:
     with session_scope() as session:
-        models = list(
+        domains = list(
             session.execute(
-                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
+                select(Domain)
+                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                .order_by(Domain.name)
             ).scalars()
         )
-    return models
+    return domains
 
 
 @bp.route("/", methods=["GET"])
 def index() -> str:
-    """List exports and available models."""
+    """List exports and available domains."""
 
-    models = _load_models()
+    domains = _load_domains()
     with session_scope() as session:
         exports = list(
             session.execute(
                 select(ExportRecord)
-                .options(joinedload(ExportRecord.model).joinedload(DataModel.domain))
+                .options(joinedload(ExportRecord.domain))
                 .order_by(ExportRecord.created_at.desc())
             ).scalars()
         )
-    return render_template("exports.html", models=models, exports=exports)
+    return render_template("exports.html", domains=domains, exports=exports)
 
 
 @bp.route("/", methods=["POST"])
@@ -62,17 +63,19 @@ def create() -> str:
     exporter = _EXPORTERS[payload.exporter]
 
     with session_scope() as session:
-        model = session.execute(
-            select(DataModel)
-            .options(joinedload(DataModel.domain))
-            .where(DataModel.id == payload.model_id)
+        domain = session.execute(
+            select(Domain)
+            .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+            .options(joinedload(Domain.relationships).joinedload(Relationship.from_entity))
+            .options(joinedload(Domain.relationships).joinedload(Relationship.to_entity))
+            .where(Domain.id == payload.domain_id)
         ).scalar_one_or_none()
-        if model is None:
-            flash("Model not found.", "error")
+        if domain is None:
+            flash("Domain not found.", "error")
             return redirect(url_for("exports.index"))
 
-        file_path = exporter(model, _OUTPUT_DIR)
-        record = ExportRecord(model=model, exporter=payload.exporter, file_path=str(file_path))
+        file_path = exporter(domain, _OUTPUT_DIR)
+        record = ExportRecord(domain=domain, exporter=payload.exporter, file_path=str(file_path))
         session.add(record)
         flash("Export generated.", "success")
 

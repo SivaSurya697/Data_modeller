@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
-from src.models.tables import Domain
+from src.models.tables import Domain, Entity
 from src.services.validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/domains")
@@ -20,7 +20,9 @@ def index() -> str:
     with session_scope() as session:
         domains = list(
             session.execute(
-                select(Domain).options(joinedload(Domain.models)).order_by(Domain.name)
+                select(Domain)
+                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                .order_by(Domain.name)
             ).scalars()
         )
     return render_template("domains.html", domains=domains)
