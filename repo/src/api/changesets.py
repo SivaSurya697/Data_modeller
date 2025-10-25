@@ -1,61 +1,53 @@
-"""Changeset endpoints."""
+"""API endpoints for working with change sets."""
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from pydantic import ValidationError
+from http import HTTPStatus
+
+from flask import Blueprint, request
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
 
 from src.models.db import session_scope
-from src.models.tables import ChangeSet, DataModel
-from src.services.validators import ChangeSetInput
+from src.models.tables import ChangeSet
 
-bp = Blueprint("changesets", __name__, url_prefix="/changesets")
+bp = Blueprint("changesets", __name__, url_prefix="/api/changesets")
 
 
-def _load_models() -> list[DataModel]:
+def _resolve_current_user() -> str:
+    """Resolve the current user from request headers."""
+
+    header_candidates = ("X-User", "X-User-Email", "X-User-Id")
+    for header in header_candidates:
+        value = request.headers.get(header)
+        if value:
+            return value
+    return "system"
+
+
+@bp.post("/")
+def create() -> tuple[dict[str, object], int]:
+    """Create a new change set in draft state."""
+
+    user = _resolve_current_user()
     with session_scope() as session:
-        models = list(
-            session.execute(
-                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
-            ).scalars()
-        )
-    return models
+        changeset = ChangeSet(title="Auto from draft", created_by=user, state="draft")
+        session.add(changeset)
+        session.flush()
+        payload = {"ok": True, "id": changeset.id}
+    return payload, HTTPStatus.CREATED
 
 
-@bp.route("/", methods=["GET"])
-def index() -> str:
-    """List changesets and provide creation form."""
+@bp.get("/")
+def index() -> tuple[list[dict[str, object]], int]:
+    """Return a list of change sets with minimal metadata."""
 
-    models = _load_models()
     with session_scope() as session:
         changesets = list(
             session.execute(
-                select(ChangeSet)
-                .options(joinedload(ChangeSet.model).joinedload(DataModel.domain))
-                .order_by(ChangeSet.created_at.desc())
+                select(ChangeSet).order_by(ChangeSet.created_at.desc())
             ).scalars()
         )
-    return render_template(
-        "changesets.html", models=models, changesets=changesets
-    )
-
-
-@bp.route("/", methods=["POST"])
-def create() -> str:
-    """Store a new changeset entry."""
-
-    try:
-        payload = ChangeSetInput(**request.form)
-    except ValidationError as exc:
-        flash(f"Invalid input: {exc}", "error")
-        return redirect(url_for("changesets.index"))
-
-    with session_scope() as session:
-        model = session.get(DataModel, payload.model_id)
-        if model is None:
-            flash("Model not found.", "error")
-            return redirect(url_for("changesets.index"))
-        session.add(ChangeSet(model=model, description=payload.description.strip()))
-        flash("Changeset recorded.", "success")
-    return redirect(url_for("changesets.index"))
+        payload = [
+            {"id": changeset.id, "title": changeset.title, "state": changeset.state}
+            for changeset in changesets
+        ]
+    return payload, HTTPStatus.OK
