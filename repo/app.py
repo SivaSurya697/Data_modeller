@@ -9,7 +9,15 @@ from flask import Flask, redirect, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from src.api import changesets, domains, exports, model, relationships, settings
+from src.api import (
+    changesets,
+    domains,
+    exports,
+    model,
+    relationships,
+    settings,
+    sources,
+)
 from src.models.db import create_all, init_engine, load_database_url, session_scope
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 

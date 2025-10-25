@@ -1,6 +1,22 @@
 """Convenience imports for Flask blueprints."""
 
-from . import changesets, domains, exports, model, relationships, settings  # noqa: F401
+from . import (  # noqa: F401
+    changesets,
+    domains,
+    exports,
+    model,
+    relationships,
+    settings,
+    sources,
+)
 
-__all__ = ["changesets", "domains", "exports", "model", "relationships", "settings"]
+__all__ = [
+    "changesets",
+    "domains",
+    "exports",
+    "model",
+    "relationships",
+    "settings",
+    "sources",
+]
 
