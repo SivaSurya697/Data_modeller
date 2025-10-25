@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.models.tables import EntityRole, SCDType
 
 
 class UserSettingsInput(BaseModel):
@@ -28,6 +29,64 @@ class DraftRequest(BaseModel):
 
     domain_id: int
     instructions: str | None = None
+
+
+class AttributeSpec(BaseModel):
+    """Validate LLM-proposed attribute metadata."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    data_type: str | None = None
+    description: str | None = None
+    is_nullable: bool = True
+    default: str | None = Field(default=None, alias="default")
+    is_measure: bool
+    is_surrogate_key: bool
+
+
+class EntitySpec(BaseModel):
+    """Validate LLM-proposed entity metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    documentation: str | None = None
+    role: EntityRole
+    grain: list[str] = Field(min_length=1)
+    scd_type: SCDType
+    attributes: list[AttributeSpec] = Field(min_length=1)
+
+    @field_validator("grain", mode="before")
+    @classmethod
+    def ensure_grain(cls, value: Any) -> list[str]:
+        if value is None:
+            raise ValueError("grain is required")
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, (list, tuple)):
+            items = list(value)
+        else:
+            raise TypeError("grain must be a list of attribute names")
+        result: list[str] = []
+        for item in items:
+            text = str(item).strip()
+            if not text:
+                raise ValueError("grain values must be non-empty strings")
+            result.append(text)
+        return result
+
+
+class ModelDraftPayload(BaseModel):
+    """Validate the full payload returned by the LLM."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = None
+    summary: str | None = None
+    definition: str | None = None
+    entities: list[EntitySpec] = Field(min_length=1)
 
 
 class ChangeSetInput(BaseModel):
@@ -130,6 +189,9 @@ __all__ = [
     "ChangeSetInput",
     "DomainInput",
     "DraftRequest",
+    "AttributeSpec",
+    "EntitySpec",
+    "ModelDraftPayload",
     "ExportRequest",
     "SourceColumnInput",
     "SourceImportRequest",

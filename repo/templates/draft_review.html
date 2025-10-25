@@ -107,6 +107,22 @@
                     {% if relationship.to_cardinality %}<span class="cardinality">({{ relationship.to_cardinality }})</span>{% endif %}
                     {% if relationship.type %} – {{ relationship.type }}{% endif %}
                     {% if relationship.description %}<br><small>{{ relationship.description }}</small>{% endif %}
+                    {% if relationship.evidence %}
+                        {% set evidence = relationship.evidence %}
+                        <div class="evidence">
+                            FK coverage: {% if evidence.coverage is not none %}{{ (evidence.coverage * 100)|round(2) }}%{% else %}n/a{% endif %}
+                            {% if evidence.match_count is defined and evidence.row_count is defined %}
+                                <small>({{ evidence.match_count }}/{{ evidence.row_count }} matches)</small>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                    {% if relationship.inference_status and relationship.inference_status != 'manual' %}
+                        <div class="relationship-actions" data-relationship-id="{{ relationship.id }}">
+                            <span class="status">Status: {{ relationship.inference_status|capitalize }}</span>
+                            <button type="button" class="btn-approve" data-action="approve">Approve</button>
+                            <button type="button" class="btn-reject" data-action="reject">Reject</button>
+                        </div>
+                    {% endif %}
                 </li>
             {% endfor %}
         </ul>
@@ -141,5 +157,35 @@
         <p>No impact detected.</p>
     {% endif %}
 </section>
+{% endif %}
+{% if draft and draft.relationships %}
+<script>
+document.addEventListener('click', async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const action = target.dataset.action;
+  if (action !== 'approve' && action !== 'reject') {
+    return;
+  }
+  const container = target.closest('.relationship-actions');
+  if (!container) return;
+  const relationshipId = container.dataset.relationshipId;
+  if (!relationshipId) return;
+  try {
+    const response = await fetch(`/api/relationships/${relationshipId}/${action}`, {method: 'POST'});
+    if (!response.ok) {
+      console.error('Failed to update relationship', await response.text());
+      return;
+    }
+    const payload = await response.json();
+    const statusEl = container.querySelector('.status');
+    if (statusEl && payload.inference_status) {
+      statusEl.textContent = `Status: ${payload.inference_status.charAt(0).toUpperCase()}${payload.inference_status.slice(1)}`;
+    }
+  } catch (error) {
+    console.error('Failed to update relationship', error);
+  }
+});
+</script>
 {% endif %}
 {% endblock %}
