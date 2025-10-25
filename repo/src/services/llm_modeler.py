@@ -18,7 +18,12 @@ from src.models.tables import (
     Relationship,
     RelationshipCardinality,
 )
-from src.services.context_builder import DomainContext, build_prompt, load_context
+from src.services.context_builder import (
+    DomainContext,
+    build_critique_messages,
+    build_draft_messages,
+    load_context,
+)
 from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
@@ -54,7 +59,7 @@ class ModelingService:
     def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
         context = load_context(session, request.domain_id)
         previous_entities = list(context.entities)
-        prompt = build_prompt(context, request.instructions)
+        draft_messages = build_draft_messages(context, request.instructions)
         user_settings = get_user_settings(session, self._user_id)
         client = LLMClient(user_settings)
         payload = client.generate_model_payload(prompt)
@@ -70,7 +75,13 @@ class ModelingService:
             session, context, payload, payload_spec, request.instructions
         )
 
-        change_hints = payload.get("changes")
+        amendments = critique_payload.get("amendments")
+        if isinstance(amendments, Mapping):
+            final_payload = self._merge_payloads(final_payload, amendments)
+
+        model = self._persist_model(session, context, final_payload, request.instructions)
+
+        change_hints = final_payload.get("changes")
         if isinstance(change_hints, str):
             hints_iter: list[str] | None = [change_hints]
         elif isinstance(change_hints, list):
@@ -96,6 +107,23 @@ class ModelingService:
             relationships=relationships,
             impact=impact,
         )
+
+    def _merge_payloads(
+        self,
+        base_payload: Mapping[str, Any],
+        overlay_payload: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = dict(base_payload)
+        if not overlay_payload:
+            return merged
+
+        for key, value in overlay_payload.items():
+            existing = merged.get(key)
+            if isinstance(existing, Mapping) and isinstance(value, Mapping):
+                merged[key] = self._merge_payloads(existing, value)
+            else:
+                merged[key] = value
+        return merged
 
     def _persist_model(
         self,

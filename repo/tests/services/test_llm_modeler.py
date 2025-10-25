@@ -29,11 +29,29 @@ def session(tmp_path, monkeypatch):
 
 
 class _StubClient:
-    def __init__(self, payload):
-        self._payload = payload
+    def __init__(
+        self,
+        draft_payload: dict,
+        critique_payload: dict | None = None,
+        amended_payload: dict | None = None,
+    ):
+        self._draft_payload = draft_payload
+        self._critique_payload = critique_payload or {}
+        self._amended_payload = amended_payload
+        self.draft_calls = 0
+        self.critique_calls = 0
+        self.draft_messages = []
+        self.critique_messages = []
 
-    def generate_model_payload(self, prompt):
-        return self._payload
+    def generate_draft_payload(self, messages):
+        self.draft_calls += 1
+        self.draft_messages.append(messages)
+        return self._draft_payload
+
+    def generate_critique_payload(self, messages):
+        self.critique_calls += 1
+        self.critique_messages.append(messages)
+        return self._critique_payload, self._amended_payload
 
 
 def test_generate_draft_increments_versions_per_domain(session, monkeypatch):
@@ -68,11 +86,9 @@ def test_generate_draft_increments_versions_per_domain(session, monkeypatch):
         ],
     }
 
-    monkeypatch.setattr(
-        llm_modeler,
-        "LLMClient",
-        lambda settings: _StubClient(payload),
-    )
+    stub = _StubClient(payload)
+
+    monkeypatch.setattr(llm_modeler, "LLMClient", lambda settings: stub)
     monkeypatch.setattr(
         llm_modeler,
         "get_user_settings",
@@ -95,6 +111,93 @@ def test_generate_draft_increments_versions_per_domain(session, monkeypatch):
     assert first.version == 1
     assert second.version == 2
     assert other.version == 1
+    assert stub.draft_calls == 3
+    assert stub.critique_calls == 3
+
+
+def test_generate_draft_applies_amendments_before_persisting(session, monkeypatch):
+    draft_payload = {
+        "name": "Sales Model",
+        "summary": "Initial summary",
+        "definition": "Initial definition.",
+        "entities": [
+            {
+                "name": "Sale",
+                "role": "fact",
+                "attributes": [
+                    {"name": "id", "data_type": "int", "is_nullable": False},
+                    {"name": "client_id", "data_type": "int", "is_nullable": False},
+                ],
+            }
+        ],
+        "changes": ["Initial note"],
+    }
+    amended_payload = {
+        "summary": "Updated summary",
+        "definition": "Better definition.",
+        "entities": [
+            {
+                "name": "Sale",
+                "role": "fact",
+                "attributes": [
+                    {"name": "id", "data_type": "int", "is_nullable": False},
+                    {"name": "client_id", "data_type": "int", "is_nullable": False},
+                    {"name": "total", "data_type": "decimal", "is_nullable": False},
+                ],
+            },
+            {
+                "name": "Client",
+                "role": "dimension",
+                "attributes": [
+                    {"name": "client_id", "data_type": "int", "is_nullable": False},
+                    {"name": "email", "data_type": "string", "is_nullable": True},
+                ],
+            },
+        ],
+        "relationships": [
+            {
+                "from": "Sale",
+                "to": "Client",
+                "type": "references",
+                "cardinality_from": "many",
+                "cardinality_to": "one",
+            }
+        ],
+    }
+    critique_payload = {
+        "issues": ["Ensure customer dimension exists"],
+        "amendments": {"changes": ["Prioritise Client data"]},
+    }
+    stub = _StubClient(draft_payload, critique_payload, amended_payload)
+
+    monkeypatch.setattr(llm_modeler, "LLMClient", lambda settings: stub)
+    monkeypatch.setattr(
+        llm_modeler,
+        "get_user_settings",
+        lambda _session, _user_id: UserSettings(user_id="tester", openai_api_key="test-key"),
+    )
+
+    domain = Domain(name="Sales", description="Sales domain")
+    session.add(domain)
+    session.flush()
+
+    result = ModelingService().generate_draft(
+        session, DraftRequest(domain_id=domain.id)
+    )
+
+    assert stub.draft_calls == 1
+    assert stub.critique_calls == 1
+    entity_names = sorted(entity.name for entity in result.entities)
+    assert entity_names == ["Client", "Sale"]
+    assert result.model.summary == "Updated summary"
+    assert result.model.definition == "Better definition."
+    assert any(
+        item.explanation == "Prioritise Client data" for item in result.impact
+    )
+    assert len(result.relationships) == 1
+    relationship = result.relationships[0]
+    assert relationship.from_entity.name == "Sale"
+    assert relationship.to_entity.name == "Client"
 
     customer = next(entity for entity in first.entities if entity.name == "Customer")
     assert customer.role is EntityRole.DIMENSION
