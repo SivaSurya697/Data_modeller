@@ -76,7 +76,7 @@ Pydantic models validate form submissions for settings, domains, and draft reque
 
 Each exporter accepts a `DataModel` instance and writes artifacts to the `outputs/` directory:
 
-- `dictionary.export_dictionary()` – generates a Markdown data dictionary summarising the model.
+- `dictionary.emit_dictionary_md()` – renders a Markdown data dictionary from a JSON payload.
 - `plantuml.export_plantuml()` – produces a PlantUML class diagram stub annotated with the model definition.
 
 New exporters can be added by following the same signature and registering them in `src/api/exports.py`.
