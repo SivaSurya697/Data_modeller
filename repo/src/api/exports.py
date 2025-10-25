@@ -1,95 +1,85 @@
-"""Model export endpoints."""
+"""Model export API endpoints."""
 from __future__ import annotations
 
+import json
+from http import HTTPStatus
 from pathlib import Path
+from typing import Any, Mapping
 
-from flask import Blueprint, Response, flash, redirect, render_template, request, send_from_directory, url_for
-from pydantic import ValidationError
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from flask import Blueprint, Response, current_app, jsonify, request
+from werkzeug.exceptions import BadRequest
 
-from src.models.db import session_scope
-from src.models.tables import DataModel, ExportRecord
-from src.services.exporters.dictionary import export_dictionary
-from src.services.exporters.plantuml import export_plantuml
-from src.services.validators import ExportRequest
+from src.services.exporters.dictionary import emit_dictionary_md
+from src.services.exporters.plantuml import emit_plantuml
 
-bp = Blueprint("exports", __name__, url_prefix="/exports")
-
-_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "outputs"
-_EXPORTERS = {
-    "dictionary": export_dictionary,
-    "plantuml": export_plantuml,
-}
+bp = Blueprint("exports_api", __name__, url_prefix="/api/exports")
 
 
-def _load_models() -> list[DataModel]:
-    with session_scope() as session:
-        models = list(
-            session.execute(
-                select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
-            ).scalars()
-        )
-    return models
+@bp.post("/plantuml")
+def create_plantuml() -> tuple[Response, int]:
+    """Generate a PlantUML diagram from the provided model payload."""
 
-
-@bp.route("/", methods=["GET"])
-def index() -> str:
-    """List exports and available models."""
-
-    models = _load_models()
-    with session_scope() as session:
-        exports = list(
-            session.execute(
-                select(ExportRecord)
-                .options(joinedload(ExportRecord.model).joinedload(DataModel.domain))
-                .order_by(ExportRecord.created_at.desc())
-            ).scalars()
-        )
-    return render_template("exports.html", models=models, exports=exports)
-
-
-@bp.route("/", methods=["POST"])
-def create() -> str:
-    """Generate a new export file."""
-
+    model_payload = _parse_model_payload()
+    artifacts_dir = _artifacts_dir()
     try:
-        payload = ExportRequest(**request.form)
-    except ValidationError as exc:
-        flash(f"Invalid input: {exc}", "error")
-        return redirect(url_for("exports.index"))
+        file_path = emit_plantuml(model_payload, artifacts_dir)
+    except ValueError as exc:  # pragma: no cover - defensive path validation
+        raise BadRequest(str(exc)) from exc
 
-    exporter = _EXPORTERS[payload.exporter]
-
-    with session_scope() as session:
-        model = session.execute(
-            select(DataModel)
-            .options(joinedload(DataModel.domain))
-            .where(DataModel.id == payload.model_id)
-        ).scalar_one_or_none()
-        if model is None:
-            flash("Model not found.", "error")
-            return redirect(url_for("exports.index"))
-
-        file_path = exporter(model, _OUTPUT_DIR)
-        record = ExportRecord(model=model, exporter=payload.exporter, file_path=str(file_path))
-        session.add(record)
-        flash("Export generated.", "success")
-
-    return redirect(url_for("exports.index"))
+    return _success_response(file_path, artifacts_dir)
 
 
-@bp.route("/<int:export_id>/download", methods=["GET"])
-def download(export_id: int) -> Response:
-    """Download a generated export."""
+@bp.post("/dictionary")
+def create_dictionary() -> tuple[Response, int]:
+    """Generate a markdown data dictionary from the provided model payload."""
 
-    with session_scope() as session:
-        record = session.get(ExportRecord, export_id)
-        if record is None:
-            flash("Export not found.", "error")
-            return redirect(url_for("exports.index"))
-        path = Path(record.file_path)
-        if not path.exists():
-            flash("Export file missing from disk.", "error")
-            return redirect(url_for("exports.index"))
-    return send_from_directory(path.parent, path.name, as_attachment=True)
+    model_payload = _parse_model_payload()
+    artifacts_dir = _artifacts_dir()
+    try:
+        file_path = emit_dictionary_md(model_payload, artifacts_dir)
+    except ValueError as exc:  # pragma: no cover - defensive path validation
+        raise BadRequest(str(exc)) from exc
+
+    return _success_response(file_path, artifacts_dir)
+
+
+def _parse_model_payload() -> Mapping[str, Any]:
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise BadRequest("Request body must be a JSON object")
+
+    if "model_json" not in data:
+        raise BadRequest("'model_json' field is required")
+
+    raw_model = data["model_json"]
+    if isinstance(raw_model, str):
+        try:
+            model_payload = json.loads(raw_model)
+        except json.JSONDecodeError as exc:
+            raise BadRequest("'model_json' string must contain valid JSON") from exc
+    elif isinstance(raw_model, dict):
+        model_payload = raw_model
+    else:
+        raise BadRequest("'model_json' must be an object or JSON string")
+
+    if not isinstance(model_payload, dict):
+        raise BadRequest("'model_json' must decode to a JSON object")
+
+    return model_payload
+
+
+def _artifacts_dir() -> Path:
+    configured = current_app.config.get("ARTIFACTS_DIR")
+    if configured:
+        return Path(configured)
+
+    fallback = Path(current_app.root_path).parent / "outputs"
+    current_app.config["ARTIFACTS_DIR"] = str(fallback)
+    return fallback
+
+
+def _success_response(file_path: Path, artifacts_dir: Path) -> tuple[Response, int]:
+    base = artifacts_dir.resolve()
+    file_location = file_path.resolve().relative_to(base)
+    payload = {"ok": True, "file": str(file_location)}
+    return jsonify(payload), HTTPStatus.CREATED
