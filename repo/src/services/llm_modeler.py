@@ -1,7 +1,9 @@
 """High level modelling workflow using OpenAI."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
