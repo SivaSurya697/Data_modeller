@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Mapping
 
 from slugify import slugify
 
@@ -56,3 +57,36 @@ def export_plantuml(domain: Domain, output_dir: Path) -> Path:
     lines.append("@enduml")
     file_path.write_text("\n".join(lines), encoding="utf-8")
     return file_path
+
+
+def export_plantuml(model: "DataModel", output_dir: Path) -> Path:  # pragma: no cover - legacy shim
+    """Backward compatible wrapper for existing callers expecting ORM models."""
+
+    payload = {
+        "name": model.name,
+        "definition": model.definition,
+        "domain": {"name": model.domain.name if model.domain else None},
+    }
+    return emit_plantuml(payload, output_dir)
+
+
+def _extract_name(model: Mapping[str, Any]) -> str:
+    value = str(model.get("name") or "Model").strip()
+    return value or "Model"
+
+
+def _extract_domain_name(model: Mapping[str, Any]) -> str:
+    domain = model.get("domain")
+    if isinstance(domain, Mapping):
+        raw = domain.get("name")
+    else:
+        raw = model.get("domain_name")
+    return str(raw).strip() if raw else ""
+
+
+def _slug(value: str) -> str:
+    slug = slugify(value)
+    return slug or "model"
+
+
+from src.models.tables import DataModel  # noqa: E402  # isort:skip

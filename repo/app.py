@@ -35,6 +35,7 @@ def create_app() -> Flask:
 
     outputs_dir = Path(__file__).resolve().parent / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
+    app.config["ARTIFACTS_DIR"] = str(outputs_dir)
 
     rate_limit_value = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
     with session_scope() as session:

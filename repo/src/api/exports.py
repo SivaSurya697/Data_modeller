@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
+from http import HTTPStatus
 from pathlib import Path
+from typing import Any, Mapping
 
-from flask import Blueprint, Response, flash, redirect, render_template, request, send_from_directory, url_for
-from pydantic import ValidationError
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from flask import Blueprint, Response, current_app, jsonify, request
+from werkzeug.exceptions import BadRequest
 
 from src.models.db import get_db
 from src.models.tables import DataModel, ExportRecord
@@ -13,14 +14,12 @@ from src.services.exporters.dictionary import export_dictionary
 from src.services.exporters.plantuml import export_plantuml
 from src.services.validators import ExportRequest
 
-bp = Blueprint("exports", __name__, url_prefix="/exports")
+bp = Blueprint("exports_api", __name__, url_prefix="/api/exports")
 
-_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "outputs"
-_EXPORTERS = {
-    "dictionary": export_dictionary,
-    "plantuml": export_plantuml,
-}
 
+@bp.post("/plantuml")
+def create_plantuml() -> tuple[Response, int]:
+    """Generate a PlantUML diagram from the provided model payload."""
 
 def _load_models() -> list[DataModel]:
     with get_db() as session:
@@ -49,10 +48,8 @@ def index() -> str:
         )
     return render_template("exports.html", domains=domains, exports=exports)
 
+    return _success_response(file_path, artifacts_dir)
 
-@bp.route("/", methods=["POST"])
-def create() -> str:
-    """Generate a new export file."""
 
     try:
         payload = ExportRequest(**request.form)
