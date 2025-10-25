@@ -1,4 +1,4 @@
-"""REST and UI endpoints for managing source metadata."""
+"""REST API for managing imported source metadata."""
 
 from __future__ import annotations
 
@@ -7,75 +7,111 @@ import json
 from flask import Blueprint, jsonify, render_template, request
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Session
 
 from src.models.db import get_db
-from src.models.tables import SourceColumn, SourceSystem, SourceTable
-from src.services.source_registry import SourceRegistryService
-from src.services.validators import SourceImportRequest, SourceProfileRequest
+from src.models.tables import SourceSystem, SourceTable
+from src.services.profiler import merge_statistics, summarise_preview
 
 bp = Blueprint("sources_api", __name__)
 ui_bp = Blueprint("sources", __name__, url_prefix="/sources")
 
-_service = SourceRegistryService()
+_DEFAULT_SYSTEM_NAME = "default"
+_DEFAULT_CONNECTION_TYPE = "external"
+_DEFAULT_SCHEMA = "public"
 
 
-def _serialize_column(column: SourceColumn) -> dict[str, object]:
+def _normalise_name(name: str) -> tuple[str, str]:
+    """Split a fully qualified table name into schema and table components."""
+
+    parts = [segment.strip() for segment in name.split(".") if segment.strip()]
+    if not parts:
+        raise ValueError("Source entries must include a non-empty name")
+    if len(parts) == 1:
+        return _DEFAULT_SCHEMA, parts[0]
+    schema = ".".join(parts[:-1])
+    return schema, parts[-1]
+
+
+def _ensure_default_system(session: Session) -> SourceSystem:
+    """Return or create the default source system."""
+
+    stmt = select(SourceSystem).where(SourceSystem.name == _DEFAULT_SYSTEM_NAME)
+    system = session.execute(stmt).scalar_one_or_none()
+    if system is None:
+        system = SourceSystem(
+            name=_DEFAULT_SYSTEM_NAME,
+            connection_type=_DEFAULT_CONNECTION_TYPE,
+        )
+        session.add(system)
+        session.flush()
+    return system
+
+
+def _serialise_table(table: SourceTable) -> dict[str, Any]:
+    """Return the public representation of a ``SourceTable``."""
+
     return {
-        "id": column.id,
-        "name": column.name,
-        "data_type": column.data_type,
-        "is_nullable": column.is_nullable,
-        "ordinal_position": column.ordinal_position,
-        "description": column.description,
-        "statistics": column.statistics or {},
-        "sample_values": column.sample_values or [],
-    }
-
-
-def _serialize_table(table: SourceTable) -> dict[str, object]:
-    return {
-        "id": table.id,
-        "system_id": table.system_id,
-        "schema_name": table.schema_name,
-        "table_name": table.table_name,
-        "display_name": table.display_name,
-        "description": table.description,
-        "schema_definition": table.schema_definition or {},
-        "table_statistics": table.table_statistics or {},
+        "name": f"{table.schema_name}.{table.table_name}",
+        "schema": table.schema_definition or {},
+        "stats": table.table_statistics or {},
         "row_count": table.row_count,
         "sampled_row_count": table.sampled_row_count,
-        "profiled_at": table.profiled_at.isoformat() if table.profiled_at else None,
-        "columns": [_serialize_column(column) for column in table.columns],
+        "profiled_at": (
+            table.profiled_at.astimezone(timezone.utc).isoformat()
+            if table.profiled_at
+            else None
+        ),
+        "description": table.description,
+        "display_name": table.display_name,
     }
 
 
-def _serialize_system(system: SourceSystem) -> dict[str, object]:
-    return {
-        "id": system.id,
-        "name": system.name,
-        "description": system.description,
-        "connection_type": system.connection_type,
-        "connection_config": system.connection_config or {},
-        "last_imported_at": system.last_imported_at.isoformat()
-        if system.last_imported_at
-        else None,
-        "tables": [_serialize_table(table) for table in system.tables],
-    }
+def _find_table_by_name(session: Session, name: str) -> SourceTable | None:
+    schema_name, table_name = _normalise_name(name)
+    stmt = (
+        select(SourceTable)
+        .join(SourceSystem)
+        .where(SourceSystem.name == _DEFAULT_SYSTEM_NAME)
+        .where(SourceTable.schema_name == schema_name)
+        .where(SourceTable.table_name == table_name)
+    )
+    return session.execute(stmt).scalar_one_or_none()
 
 
-@bp.route("/", methods=["GET"])
+@bp.get("/")
 def list_sources():
-    """Return a JSON payload containing registered source systems."""
+    """Return all imported sources."""
 
     with get_db() as session:
-        systems = _service.list_systems(session)
-    return jsonify([_serialize_system(system) for system in systems])
+        system = _ensure_default_system(session)
+        stmt = (
+            select(SourceTable)
+            .where(SourceTable.system_id == system.id)
+            .order_by(SourceTable.schema_name, SourceTable.table_name)
+        )
+        tables = list(session.execute(stmt).scalars())
+    return jsonify({"sources": [_serialise_table(table) for table in tables]})
 
 
-@bp.route("/import", methods=["POST"])
+@bp.get("/<path:source_name>")
+def get_source(source_name: str):
+    """Return details for a single imported source."""
+
+    try:
+        with get_db() as session:
+            table = _find_table_by_name(session, source_name)
+            if table is None:
+                return jsonify({"error": f"Source '{source_name}' was not found."}), 404
+            payload = _serialise_table(table)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"source": payload})
+
+
+@bp.post("/import")
 def import_sources():
-    """Persist metadata for a source system and its tables."""
+    """Create or update source metadata in bulk."""
 
     payload = request.get_json(silent=True)
     if payload is None and request.form:
@@ -96,35 +132,125 @@ def import_sources():
         else:
             return jsonify({"error": "Request body must be JSON."}), 400
 
-    try:
-        request_model = SourceImportRequest(**payload)
-    except ValidationError as exc:
-        return jsonify({"error": exc.errors()}), 400
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        return jsonify({"error": "Import payload must include a 'sources' array."}), 400
 
     with get_db() as session:
-        try:
-            system = _service.import_source(
-                session,
-                request_model.model_dump(by_alias=True, exclude_none=True),
-            )
+        system = _ensure_default_system(session)
+        created = 0
+        updated = 0
+        serialised: list[dict[str, Any]] = []
+
+        for entry in sources:
+            if not isinstance(entry, dict):
+                return jsonify({"error": "Each source entry must be an object."}), 400
+
+            name = entry.get("name")
+            if not isinstance(name, str) or not name.strip():
+                return jsonify({"error": "Source entries require a non-empty 'name'."}), 400
+
+            try:
+                schema_name, table_name = _normalise_name(name)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+
             stmt = (
-                select(SourceSystem)
-                .options(
-                    joinedload(SourceSystem.tables).joinedload(SourceTable.columns)
-                )
-                .where(SourceSystem.id == system.id)
+                select(SourceTable)
+                .where(SourceTable.system_id == system.id)
+                .where(SourceTable.schema_name == schema_name)
+                .where(SourceTable.table_name == table_name)
             )
-            persisted = session.execute(stmt).unique().scalar_one()
-        except ValueError as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 400
+            table = session.execute(stmt).scalar_one_or_none()
+            is_new = table is None
 
-    return jsonify(_serialize_system(persisted)), 201
+            if is_new:
+                table = SourceTable(
+                    system_id=system.id,
+                    schema_name=schema_name,
+                    table_name=table_name,
+                )
+                session.add(table)
+
+            changed = False
+
+            for attr in ("display_name", "description"):
+                if attr in entry:
+                    value = entry.get(attr)
+                    if getattr(table, attr) != value:
+                        setattr(table, attr, value)
+                        changed = True
+
+            schema_definition = entry.get("schema") or entry.get("schema_definition")
+            if schema_definition is not None and table.schema_definition != schema_definition:
+                table.schema_definition = schema_definition
+                changed = True
+
+            stats = entry.get("stats") or entry.get("statistics")
+            if stats is not None:
+                if table.table_statistics is None:
+                    table.table_statistics = stats
+                    changed = True
+                else:
+                    merged = merge_statistics(table.table_statistics, stats)
+                    if merged != table.table_statistics:
+                        table.table_statistics = merged
+                        changed = True
+
+            if "row_count" in entry:
+                row_count = entry.get("row_count")
+                if table.row_count != row_count:
+                    table.row_count = row_count
+                    changed = True
+
+            if "profiled_at" in entry and entry.get("profiled_at"):
+                profiled_at = _parse_datetime(entry.get("profiled_at"))
+                if profiled_at and table.profiled_at != profiled_at:
+                    table.profiled_at = profiled_at
+                    changed = True
+
+            if "sampled_row_count" in entry:
+                sampled = entry.get("sampled_row_count")
+                if table.sampled_row_count != sampled:
+                    table.sampled_row_count = sampled
+                    changed = True
+
+            if table.table_statistics is not None:
+                if table.row_count is None:
+                    maybe_row_count = table.table_statistics.get("row_count")
+                    if maybe_row_count is not None and table.row_count != maybe_row_count:
+                        table.row_count = maybe_row_count
+                        changed = True
+                if table.sampled_row_count is None:
+                    sampled_value = table.table_statistics.get("sampled_row_count")
+                    if sampled_value is not None and table.sampled_row_count != sampled_value:
+                        table.sampled_row_count = sampled_value
+                        changed = True
+                if table.profiled_at is None:
+                    profiled_value = table.table_statistics.get("profiled_at")
+                    profiled_at = _parse_datetime(profiled_value)
+                    if profiled_at and table.profiled_at != profiled_at:
+                        table.profiled_at = profiled_at
+                        changed = True
+
+            if table.schema_definition is None:
+                table.schema_definition = {}
+
+            if is_new:
+                created += 1
+            elif changed:
+                updated += 1
+
+            serialised.append(_serialise_table(table))
+
+        session.flush()
+
+    return jsonify({"created": created, "updated": updated, "sources": serialised})
 
 
-@bp.route("/profile", methods=["POST"])
-def profile_table():
-    """Update profiling statistics for a previously imported table."""
+@bp.post("/profile")
+def profile_source():
+    """Update profiling statistics for a source."""
 
     payload = request.get_json(silent=True)
     if payload is None and request.form:
@@ -180,34 +306,32 @@ def profile_table():
 
         return jsonify({"error": exc.errors()}), 400
 
-    with get_db() as session:
-        try:
-            table = _service.profile_table(
-                session,
-                table_id=request_model.table_id,
-                samples=request_model.samples,
-                total_rows=request_model.total_rows,
+            preview = summarise_preview(rows)
+            profiled_at = _parse_datetime(preview.get("profiled_at")) or datetime.now(
+                timezone.utc
             )
-            stmt = (
-                select(SourceTable)
-                .options(joinedload(SourceTable.columns))
-                .where(SourceTable.id == table.id)
-            )
-            persisted = session.execute(stmt).unique().scalar_one()
-        except LookupError as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 404
 
-    return jsonify(_serialize_table(persisted)), 200
+            table.sampled_row_count = preview["sampled_row_count"]
+            table.profiled_at = profiled_at
+            if total_rows is not None:
+                table.row_count = total_rows
 
+            stats_update: dict[str, Any] = {
+                "profiled_at": preview["profiled_at"],
+                "sampled_row_count": preview["sampled_row_count"],
+                "columns": preview.get("columns", {}),
+                "preview_rows": preview.get("preview_rows"),
+            }
+            if total_rows is not None:
+                stats_update["row_count"] = total_rows
+            elif table.row_count is not None:
+                stats_update["row_count"] = table.row_count
 
-@ui_bp.route("/")
-def index():
-    """Render the sources dashboard."""
+            table.table_statistics = merge_statistics(table.table_statistics, stats_update)
 
     with get_db() as session:
         systems = _service.list_systems(session)
     return render_template("sources.html", sources=systems)
 
 
-__all__ = ["bp", "ui_bp"]
+__all__ = ["bp"]
