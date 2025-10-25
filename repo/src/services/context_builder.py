@@ -75,15 +75,19 @@ class DomainContext:
 def load_context(session: Session, domain_id: int) -> DomainContext:
     """Load the aggregated context for a domain."""
 
-    domain = session.execute(
-        select(Domain)
-        .where(Domain.id == domain_id)
-        .options(
-            joinedload(Domain.entities).joinedload(Entity.attributes),
-            joinedload(Domain.relationships).joinedload(Relationship.from_entity),
-            joinedload(Domain.relationships).joinedload(Relationship.to_entity),
+    domain = (
+        session.execute(
+            select(Domain)
+            .where(Domain.id == domain_id)
+            .options(
+                joinedload(Domain.entities).joinedload(Entity.attributes),
+                joinedload(Domain.relationships).joinedload(Relationship.from_entity),
+                joinedload(Domain.relationships).joinedload(Relationship.to_entity),
+            )
         )
-    ).scalar_one_or_none()
+        .unique()
+        .scalar_one_or_none()
+    )
     if domain is None:
         raise ValueError("Domain not found")
 
