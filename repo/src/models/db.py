@@ -1,22 +1,26 @@
-"""Database session management utilities."""
+"""Database engine and session utilities."""
 from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import Iterator
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.models.tables import Base
 
-_ENGINE: Engine | None = None
-_SESSION_FACTORY: scoped_session[Session] | None = None
+_settings = load_settings()
 
+engine = create_engine(_settings.database_url, future=True)
+"""SQLAlchemy engine bound to the configured database."""
 
-def init_engine(database_url: str | None = None) -> Engine:
-    """Initialise the SQLAlchemy engine and session factory."""
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+)
+"""Factory for creating database sessions."""
 
     url = database_url or os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
     engine = create_engine(url, future=True)
@@ -47,13 +51,10 @@ def create_all() -> None:
 
 
 @contextmanager
-def session_scope() -> Iterator[Session]:
-    """Provide a transactional scope for database work."""
+def get_db() -> Iterator[Session]:
+    """Yield a database session ensuring transactional safety."""
 
-    if _SESSION_FACTORY is None:
-        init_engine()
-    assert _SESSION_FACTORY is not None  # For type-checkers
-    session = _SESSION_FACTORY()
+    session = SessionLocal()
     try:
         yield session
         session.commit()
@@ -62,3 +63,13 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def create_all() -> None:
+    """Create database tables defined on the declarative base."""
+
+    # Import within the function to ensure all models are registered without
+    # creating circular import issues during module initialisation.
+    from src.models import tables  # noqa: WPS433 - imported for side effects only
+
+    Base.metadata.create_all(bind=engine)
