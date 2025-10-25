@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import DataModel
-from src.services.context_builder import build_prompt, load_context
+from src.models.tables import DataModel, Domain
+from src.services.context_builder import compact_prior_context
 from src.services.impact import evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import AppSettings
@@ -30,19 +31,41 @@ class ModelingService:
     def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
         """Create and persist a model draft for the provided domain."""
 
-        context = load_context(session, request.domain_id)
-        prompt = build_prompt(context, request.instructions)
+        domain = session.get(Domain, request.domain_id)
+        if domain is None:
+            raise ValueError("Domain not found")
+
+        existing_models = list(
+            session.execute(
+                select(DataModel)
+                .where(DataModel.domain_id == domain.id)
+                .order_by(DataModel.updated_at.desc())
+            ).scalars()
+        )
+
+        prior_context = compact_prior_context(session, domain.name)
+        prompt_parts: list[str] = [
+            "You are a senior data modeller helping design conceptual data models.",
+            f"Prior domain context (JSON):\n{prior_context}",
+        ]
+        if request.instructions:
+            prompt_parts.append(f"User instructions:\n{request.instructions.strip()}")
+        prompt_parts.append(
+            "Respond using JSON with keys 'name', 'summary', 'definition' and optional 'changes'."
+        )
+        prompt = "\n\n".join(part for part in prompt_parts if part)
+
         client = LLMClient(self._settings)
         payload = client.generate_model_payload(prompt)
 
-        name = str(payload.get("name") or f"{context.domain.name} Model")
+        name = str(payload.get("name") or f"{domain.name} Model")
         summary = str(payload.get("summary") or "Model summary pending review.")
         definition = str(payload.get("definition") or "")
         if not definition:
             raise ValueError("Model definition missing from LLM response")
 
         model = DataModel(
-            domain=context.domain,
+            domain=domain,
             name=name.strip(),
             summary=summary.strip(),
             definition=definition.strip(),
@@ -59,6 +82,6 @@ class ModelingService:
         else:
             change_hints = None
 
-        impact = evaluate_model_impact(context.models, model.definition, change_hints)
+        impact = evaluate_model_impact(existing_models, model.definition, change_hints)
 
         return DraftResult(model=model, impact=impact)
