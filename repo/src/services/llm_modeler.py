@@ -1,4 +1,4 @@
-"""High level modelling workflow using OpenAI."""
+"""Prompt builders for the modelling workflows."""
 from __future__ import annotations
 
 import json

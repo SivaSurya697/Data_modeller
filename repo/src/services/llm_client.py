@@ -27,6 +27,8 @@ _RECOVERABLE_ERRORS: tuple[type[OpenAIError], ...] = (
     APIError,
 )
 
+ChatMessage = Mapping[str, str]
+
 
 def get_openai_client(db: Session, user_id: int) -> OpenAI:
     """Instantiate an OpenAI client for the provided database session."""
