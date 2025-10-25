@@ -31,14 +31,15 @@ class DraftRequest(BaseModel):
 class ChangeSetInput(BaseModel):
     """Validate changeset form submissions."""
 
-    model_id: int
-    description: str = Field(min_length=1)
+    domain_id: int
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(min_length=1)
 
 
 class ExportRequest(BaseModel):
     """Validate export request input."""
 
-    model_id: int
+    domain_id: int
     exporter: str
 
     @field_validator("exporter")

@@ -25,7 +25,7 @@ def _load_models() -> list[DataModel]:
                 select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
             ).scalars()
         )
-    return models
+    return domains
 
 
 @bp.get("/")
@@ -40,7 +40,7 @@ def index() -> tuple[list[dict[str, object]], int]:
             ).scalars()
         )
     return render_template(
-        "changesets.html", models=models, changesets=changesets
+        "changesets.html", domains=domains, changesets=changesets
     )
 
 
@@ -59,6 +59,12 @@ def create() -> str:
         if model is None:
             flash("Model not found.", "error")
             return redirect(url_for("changesets.index"))
-        session.add(ChangeSet(model=model, description=payload.description.strip()))
+        session.add(
+            ChangeSet(
+                domain=domain,
+                title=payload.title.strip(),
+                summary=payload.summary.strip(),
+            )
+        )
         flash("Changeset recorded.", "success")
     return redirect(url_for("changesets.index"))

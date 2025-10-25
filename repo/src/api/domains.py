@@ -20,7 +20,9 @@ def index() -> str:
     with get_db() as session:
         domains = list(
             session.execute(
-                select(Domain).options(joinedload(Domain.models)).order_by(Domain.name)
+                select(Domain)
+                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                .order_by(Domain.name)
             ).scalars()
         )
     return render_template("domains.html", domains=domains)
