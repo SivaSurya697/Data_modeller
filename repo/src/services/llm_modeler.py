@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping, TypeVar
+from typing import Any, Mapping, Sequence, TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from src.models.tables import (
     DataModel,
     Entity,
     EntityRole,
+    SCDType,
     Relationship,
     RelationshipCardinality,
 )
@@ -26,8 +27,13 @@ from src.services.context_builder import (
 from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
-from src.services.validators import DraftRequest
+from src.services.validators import (
+    DraftRequest,
+    EntitySpec,
+    ModelDraftPayload,
+)
 from src.services.model_analysis import infer_model_version
+from pydantic import ValidationError
 
 
 @dataclass(slots=True)
@@ -56,16 +62,18 @@ class ModelingService:
         draft_messages = build_draft_messages(context, request.instructions)
         user_settings = get_user_settings(session, self._user_id)
         client = LLMClient(user_settings)
-        initial_payload = client.generate_draft_payload(draft_messages)
+        payload = client.generate_model_payload(prompt)
+        try:
+            payload_spec = ModelDraftPayload.model_validate(payload)
+        except ValidationError as exc:
+            raise ValueError(
+                "Generated draft is missing required metadata; "
+                "ensure grain, SCD type, and measure flags are provided"
+            ) from exc
 
-        critique_messages = build_critique_messages(
-            context, request.instructions, initial_payload
+        model = self._persist_model(
+            session, context, payload, payload_spec, request.instructions
         )
-        critique_payload, amended_payload = client.generate_critique_payload(
-            critique_messages
-        )
-
-        final_payload = self._merge_payloads(initial_payload, amended_payload)
 
         amendments = critique_payload.get("amendments")
         if isinstance(amendments, Mapping):
@@ -122,14 +130,21 @@ class ModelingService:
         session: Session,
         context: DomainContext,
         payload: Mapping[str, Any],
+        payload_spec: ModelDraftPayload,
         instructions: str | None,
     ) -> DataModel:
         domain = context.domain
 
-        name = str(payload.get("name") or f"{domain.name} Model").strip()
-        summary = str(payload.get("summary") or "Model summary pending review.").strip()
+        name = str(
+            payload_spec.name or payload.get("name") or f"{domain.name} Model"
+        ).strip()
+        summary = str(
+            payload_spec.summary
+            or payload.get("summary")
+            or "Model summary pending review."
+        ).strip()
 
-        definition_source = payload.get("definition")
+        definition_source = payload_spec.definition or payload.get("definition")
         if definition_source is None or not str(definition_source).strip():
             definition_source = (
                 payload.get("summary")
@@ -146,7 +161,12 @@ class ModelingService:
             session.delete(entity)
         session.flush()
 
-        entities = self._build_entities(domain, payload)
+        entities = self._build_entities(
+            domain,
+            payload_spec.entities,
+            summary=summary,
+            definition=definition,
+        )
         for entity in entities:
             session.add(entity)
         session.flush()
@@ -173,69 +193,67 @@ class ModelingService:
 
         return model
 
-    def _build_entities(self, domain: Any, payload: Mapping[str, Any]) -> list[Entity]:
+    def _build_entities(
+        self,
+        domain: Any,
+        entities_spec: Sequence[EntitySpec],
+        *,
+        summary: str | None,
+        definition: str | None,
+    ) -> list[Entity]:
         entities: list[Entity] = []
-        raw_entities = payload.get("entities")
-        if isinstance(raw_entities, list):
-            for index, item in enumerate(raw_entities, start=1):
-                if not isinstance(item, dict):
-                    continue
-                entity_name = str(item.get("name") or f"{domain.name} Entity {index}").strip()
-                role_value = item.get("role") or item.get("entity_role")
-                if role_value is None or str(role_value).strip() == "":
-                    entity_role = EntityRole.UNKNOWN
-                else:
-                    entity_role = self._coerce_enum(
-                        role_value,
-                        enum_cls=EntityRole,
-                        field_name="role",
-                        context=f"Entity '{entity_name}'",
-                    )
-                entity = Entity(
-                    domain=domain,
-                    name=entity_name,
-                    description=(str(item.get("description")) or "").strip() or None,
-                    documentation=(str(item.get("documentation")) or "").strip() or None,
-                    entity_role=entity_role,
+        for index, item in enumerate(entities_spec, start=1):
+            entity_name = item.name or f"{domain.name} Entity {index}"
+            entity = Entity(
+                domain=domain,
+                name=entity_name,
+                description=(item.description or "").strip() or None,
+                documentation=(item.documentation or "").strip() or None,
+                role=item.role,
+                grain_json=item.grain,
+                scd_type=item.scd_type,
+            )
+            attribute_lookup: dict[str, Attribute] = {}
+            for attribute_item in item.attributes:
+                attr_name = attribute_item.name.strip()
+                attribute = Attribute(
+                    name=attr_name,
+                    data_type=(attribute_item.data_type or "").strip() or None,
+                    description=(attribute_item.description or "").strip() or None,
+                    is_nullable=bool(attribute_item.is_nullable),
+                    default_value=(
+                        str(attribute_item.default).strip()
+                        if attribute_item.default is not None
+                        else None
+                    ),
+                    is_measure=bool(attribute_item.is_measure),
+                    is_surrogate_key=bool(attribute_item.is_surrogate_key),
                 )
-                attributes_raw = item.get("attributes")
-                if isinstance(attributes_raw, list):
-                    for attribute_item in attributes_raw:
-                        if not isinstance(attribute_item, dict):
-                            continue
-                        attr_name = str(attribute_item.get("name") or "").strip()
-                        if not attr_name:
-                            continue
-                        attribute = Attribute(
-                            name=attr_name,
-                            data_type=(
-                                str(attribute_item.get("data_type"))
-                                if attribute_item.get("data_type")
-                                else None
-                            ),
-                            description=(
-                                str(attribute_item.get("description"))
-                                if attribute_item.get("description")
-                                else None
-                            ),
-                            is_nullable=bool(attribute_item.get("is_nullable", True)),
-                            default_value=(
-                                str(attribute_item.get("default"))
-                                if attribute_item.get("default")
-                                else None
-                            ),
-                        )
-                        entity.attributes.append(attribute)
-                entities.append(entity)
+                entity.attributes.append(attribute)
+                attribute_lookup[attr_name.lower()] = attribute
+
+            missing_grain = [
+                grain_name
+                for grain_name in item.grain
+                if grain_name.lower().strip() not in attribute_lookup
+            ]
+            if missing_grain:
+                missing = ", ".join(sorted(set(missing_grain)))
+                raise ValueError(
+                    f"Entity '{entity_name}' references unknown grain attributes: {missing}"
+                )
+            entities.append(entity)
         if not entities:
             # Fall back to a single entity describing the domain using the definition.
             entities.append(
                 Entity(
                     domain=domain,
                     name=f"{domain.name} Entity",
-                    description=payload.get("summary"),
-                    documentation=payload.get("definition"),
-                    entity_role=EntityRole.UNKNOWN,
+                    description=summary,
+                    documentation=definition,
+                    role=EntityRole.UNKNOWN,
+                    grain_json=[],
+                    scd_type=SCDType.NONE,
                 )
             )
         return entities

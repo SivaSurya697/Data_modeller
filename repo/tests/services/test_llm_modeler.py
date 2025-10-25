@@ -8,7 +8,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.models import db as db_module
-from src.models.tables import Domain
+from src.models.tables import Domain, EntityRole, SCDType
 from src.services import llm_modeler
 from src.services.llm_modeler import ModelingService
 from src.services.settings import UserSettings
@@ -63,9 +63,24 @@ def test_generate_draft_increments_versions_per_domain(session, monkeypatch):
             {
                 "name": "Customer",
                 "description": "Tracks customers",
+                "role": "dimension",
+                "grain": ["customer_id"],
+                "scd_type": "type_2",
                 "attributes": [
-                    {"name": "id", "data_type": "int", "is_nullable": False},
-                    {"name": "email", "data_type": "string", "is_nullable": True},
+                    {
+                        "name": "customer_id",
+                        "data_type": "int",
+                        "is_nullable": False,
+                        "is_measure": False,
+                        "is_surrogate_key": True,
+                    },
+                    {
+                        "name": "email",
+                        "data_type": "string",
+                        "is_nullable": True,
+                        "is_measure": False,
+                        "is_surrogate_key": False,
+                    },
                 ],
             }
         ],
@@ -183,4 +198,103 @@ def test_generate_draft_applies_amendments_before_persisting(session, monkeypatc
     relationship = result.relationships[0]
     assert relationship.from_entity.name == "Sale"
     assert relationship.to_entity.name == "Client"
+
+    customer = next(entity for entity in first.entities if entity.name == "Customer")
+    assert customer.role is EntityRole.DIMENSION
+    assert customer.scd_type is SCDType.TYPE_2
+    assert customer.grain_json == ["customer_id"]
+    attr_lookup = {attr.name: attr for attr in customer.attributes}
+    assert attr_lookup["customer_id"].is_surrogate_key is True
+    assert attr_lookup["customer_id"].is_measure is False
+    assert attr_lookup["email"].is_measure is False
+
+
+def test_generate_draft_requires_metadata(session, monkeypatch):
+    payload = {
+        "name": "Sales Model",
+        "entities": [
+            {
+                "name": "Order",
+                "role": "fact",
+                # Missing grain/scd_type/attribute metadata
+                "attributes": [
+                    {"name": "order_id", "is_nullable": False},
+                ],
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        llm_modeler,
+        "LLMClient",
+        lambda settings: _StubClient(payload),
+    )
+    monkeypatch.setattr(
+        llm_modeler,
+        "get_user_settings",
+        lambda _session, _user_id: UserSettings(
+            user_id="tester", openai_api_key="test-key"
+        ),
+    )
+
+    sales = Domain(name="Sales", description="Sales domain")
+    session.add(sales)
+    session.flush()
+
+    service = ModelingService()
+
+    with pytest.raises(ValueError):
+        service.generate_draft(session, DraftRequest(domain_id=sales.id))
+
+
+def test_generate_draft_validates_grain_against_attributes(session, monkeypatch):
+    payload = {
+        "name": "Sales Model",
+        "entities": [
+            {
+                "name": "Order",
+                "role": "fact",
+                "grain": ["order_id", "missing_col"],
+                "scd_type": "none",
+                "attributes": [
+                    {
+                        "name": "order_id",
+                        "is_nullable": False,
+                        "is_measure": False,
+                        "is_surrogate_key": True,
+                    },
+                    {
+                        "name": "total",
+                        "is_nullable": False,
+                        "is_measure": True,
+                        "is_surrogate_key": False,
+                    },
+                ],
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        llm_modeler,
+        "LLMClient",
+        lambda settings: _StubClient(payload),
+    )
+    monkeypatch.setattr(
+        llm_modeler,
+        "get_user_settings",
+        lambda _session, _user_id: UserSettings(
+            user_id="tester", openai_api_key="test-key"
+        ),
+    )
+
+    sales = Domain(name="Sales", description="Sales domain")
+    session.add(sales)
+    session.flush()
+
+    service = ModelingService()
+
+    with pytest.raises(ValueError) as exc:
+        service.generate_draft(session, DraftRequest(domain_id=sales.id))
+
+    assert "missing_col" in str(exc.value)
 
