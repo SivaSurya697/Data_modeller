@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from src.models.tables import Attribute, Entity, Relationship
 from src.services.context_builder import build_prompt, load_context
-from src.services.impact import evaluate_model_impact
+from src.services.impact import compute_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 from src.services.validators import DraftRequest

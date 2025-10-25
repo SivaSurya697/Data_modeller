@@ -1,8 +1,8 @@
-"""Determine the impact of generated models."""
+"""Determine the downstream impact of shared dimension changes."""
 from __future__ import annotations
 
-from difflib import unified_diff
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from src.models.tables import Entity
 
@@ -32,9 +32,8 @@ def evaluate_model_impact(
 ) -> list[str]:
     """Generate a human readable impact assessment between entity sets."""
 
-    impact: list[str] = []
-    if change_hints:
-        impact.extend([hint.strip() for hint in change_hints if hint.strip()])
+    if value is None:
+        return []
 
     if not existing_entities:
         impact.append("No prior entities exist for comparison.")
@@ -72,3 +71,4 @@ def evaluate_model_impact(
         impact.append("No structural differences detected against the latest entities.")
 
     return impact
+
