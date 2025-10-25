@@ -10,7 +10,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from src.api import changesets, domains, exports, model, settings
-from src.models.db import create_all, init_engine, session_scope
+from src.models.db import create_all, init_engine, load_database_url, session_scope
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 
 
@@ -29,8 +29,7 @@ def create_app() -> Flask:
     )
     app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me")
 
-    database_url = os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
-    init_engine(database_url)
+    init_engine(load_database_url())
     create_all()
 
     outputs_dir = Path(__file__).resolve().parent / "outputs"

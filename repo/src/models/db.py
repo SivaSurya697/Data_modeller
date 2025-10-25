@@ -21,11 +21,25 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 # the model modules import it.  Individual model classes subclass ``Base``.
 Base = declarative_base()
 
+# Default connection string used when no explicit configuration is supplied.
+DEFAULT_DATABASE_URL = "sqlite:///data_modeller.db"
+
 # Module level caches populated by ``init_engine``.  They are initialised on
 # demand which keeps import time side effects to a minimum while still allowing
 # imperative configuration during application start-up.
 _ENGINE: Engine | None = None
 _SESSION_FACTORY: sessionmaker[Session] | None = None
+
+
+def load_database_url() -> str:
+    """Return the configured database connection string.
+
+    The helper centralises configuration of the SQLAlchemy engine.  Environment
+    variables are read lazily so that tests can patch ``DATABASE_URL`` without
+    importing the module eagerly.
+    """
+
+    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
 def init_engine(database_url: str | None = None) -> Engine:
@@ -39,7 +53,7 @@ def init_engine(database_url: str | None = None) -> Engine:
         SQLite database.  The created engine is cached for subsequent calls.
     """
 
-    url = database_url or os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
+    url = database_url or load_database_url()
     engine = create_engine(url, future=True)
 
     global _ENGINE, _SESSION_FACTORY  # noqa: PLW0603 - module level cache
@@ -116,6 +130,7 @@ __all__ = [
     "create_all",
     "get_db",
     "get_engine",
+    "load_database_url",
     "init_engine",
     "session_scope",
 ]
