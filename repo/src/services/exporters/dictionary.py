@@ -1,10 +1,10 @@
-"""Export a data dictionary for a model."""
+"""Render a markdown data dictionary from a JSON model payload."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from slugify import slugify
 
 from src.models.tables import Domain, Entity
 
