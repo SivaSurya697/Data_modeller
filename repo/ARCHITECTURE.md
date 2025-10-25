@@ -19,7 +19,7 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 ## Application bootstrap (`app.py`)
 
-- Loads environment variables using `python-dotenv` and caches typed settings via `src/services/settings.load_settings`.
+- Loads environment variables using `python-dotenv` and configures the database engine via `src/models/db.init_engine`.
 - Configures the Flask app with shared settings and an `instance/` folder for local configuration.
 - Ensures database tables exist via `src/models/db.create_all()` using the pre-configured SQLAlchemy engine.
 - Sets up rate limiting with `flask-limiter` based on the configured requests-per-minute value.
@@ -34,7 +34,7 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 The ORM models in `src/models/tables.py` define the storage schema:
 
-- `Setting` – key/value configuration overrides persisted in the database.
+- `Settings` – per-user configuration including encrypted OpenAI credentials.
 - `Domain` – group of related data models.
 - `DataModel` – individual model drafts, including summary, markdown definition, and optional instructions.
 - `ChangeSet` – human-authored change notes tied to a `DataModel`.
@@ -50,7 +50,7 @@ The ORM models in `src/models/tables.py` define the storage schema:
 
 ### Configuration (`src/services/settings.py`)
 
-`AppSettings` is a Pydantic model that normalises environment variables. The `load_settings()` function caches a single instance per process, ensuring consistent configuration throughout requests.
+`save_user_settings()` persists encrypted API credentials for a user, while `get_user_settings()` decrypts and returns them as a `UserSettings` dataclass. Both helpers operate on a SQLAlchemy session and rely on a Fernet key supplied via the `SETTINGS_ENCRYPTION_KEY` environment variable.
 
 ### Prompt context (`src/services/context_builder.py`)
 

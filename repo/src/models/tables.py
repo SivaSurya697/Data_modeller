@@ -9,14 +9,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.db import Base
 
 
-class Setting(Base):
-    """Key/value configuration stored in the database."""
+class Settings(Base):
+    """Per-user application configuration stored securely."""
 
     __tablename__ = "settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    encrypted_openai_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    openai_base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -1,13 +1,13 @@
 """Database engine and session utilities."""
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
-from src.services.settings import load_settings
+from src.models.tables import Base
 
 _settings = load_settings()
 
@@ -22,8 +22,32 @@ SessionLocal = sessionmaker(
 )
 """Factory for creating database sessions."""
 
-Base = declarative_base()
-"""Declarative base class for ORM models."""
+    url = database_url or os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
+    engine = create_engine(url, future=True)
+    session_factory = scoped_session(
+        sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    )
+
+    global _ENGINE  # noqa: PLW0603 - module level cache is intentional
+    global _SESSION_FACTORY  # noqa: PLW0603
+    _ENGINE = engine
+    _SESSION_FACTORY = session_factory
+    return engine
+
+
+def get_engine() -> Engine:
+    """Return the active SQLAlchemy engine."""
+
+    if _ENGINE is None:
+        return init_engine()
+    return _ENGINE
+
+
+def create_all() -> None:
+    """Create database tables based on the metadata."""
+
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
 
 
 @contextmanager

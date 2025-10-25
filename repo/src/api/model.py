@@ -8,7 +8,6 @@ from sqlalchemy import select
 from src.models.db import get_db
 from src.models.tables import Domain
 from src.services.llm_modeler import ModelingService
-from src.services.settings import load_settings
 from src.services.validators import DraftRequest
 
 bp = Blueprint("modeler", __name__, url_prefix="/modeler")
@@ -38,8 +37,7 @@ def generate_draft() -> str:
         flash(f"Invalid input: {exc}", "error")
         return redirect(url_for("modeler.draft_review"))
 
-    settings = load_settings()
-    service = ModelingService(settings)
+    service = ModelingService()
 
     try:
         with get_db() as session:
