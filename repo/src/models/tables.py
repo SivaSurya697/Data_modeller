@@ -12,7 +12,18 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.sql import expression
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db import Base
@@ -68,6 +79,12 @@ class Domain(Base, TimestampMixin):
     exports: Mapped[list["ExportRecord"]] = relationship(
         "ExportRecord", back_populates="domain", cascade="all, delete-orphan"
     )
+    published_models: Mapped[list["PublishedModel"]] = relationship(
+        "PublishedModel",
+        back_populates="domain",
+        cascade="all, delete-orphan",
+        order_by="PublishedModel.created_at",
+    )
     created_review_tasks: Mapped[list["ReviewTask"]] = relationship(
         "ReviewTask",
         back_populates="source_domain",
@@ -101,6 +118,11 @@ class DataModel(Base, TimestampMixin):
     )
 
     domain: Mapped[Domain] = relationship("Domain", back_populates="models")
+    publications: Mapped[list["PublishedModel"]] = relationship(
+        "PublishedModel",
+        back_populates="model",
+        cascade="all, delete-orphan",
+    )
 
 
 class EntityRole(str, Enum):
@@ -129,6 +151,12 @@ class Entity(Base, TimestampMixin):
         nullable=False,
         default=EntityRole.UNKNOWN,
         server_default=EntityRole.UNKNOWN.value,
+    )
+    is_locked: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
     )
 
     __table_args__ = (UniqueConstraint("domain_id", "name", name="uq_entity_domain_name"),)
@@ -300,6 +328,30 @@ class ExportRecord(Base, TimestampMixin):
     domain: Mapped[Domain] = relationship("Domain", back_populates="exports")
 
 
+class PublishedModel(Base, TimestampMixin):
+    """Record of published dimensional model artifacts."""
+
+    __tablename__ = "published_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain_id: Mapped[int] = mapped_column(
+        ForeignKey("domains.id", ondelete="CASCADE"), nullable=False
+    )
+    model_id: Mapped[int] = mapped_column(
+        ForeignKey("data_models.id", ondelete="CASCADE"), nullable=False
+    )
+    version_tag: Mapped[str] = mapped_column(String(100), nullable=False)
+    artifact_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    quality_report: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("domain_id", "version_tag", name="uq_published_domain_tag"),
+    )
+
+    domain: Mapped[Domain] = relationship("Domain", back_populates="published_models")
+    model: Mapped[DataModel] = relationship("DataModel", back_populates="publications")
+
+
 __all__ = [
     "Attribute",
     "ChangeSet",
@@ -307,6 +359,7 @@ __all__ = [
     "Domain",
     "Entity",
     "ExportRecord",
+    "PublishedModel",
     "Relationship",
     "ReviewTask",
     "Settings",
