@@ -9,7 +9,7 @@ from flask import Flask, redirect, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from src.api import changesets, domains, exports, model, settings
+from src.api import changesets, coverage, domains, exports, model, quality, settings
 from src.models.db import create_all, init_engine, load_database_url, session_scope
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 
@@ -76,6 +76,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(model.bp)
     app.register_blueprint(changesets.bp)
     app.register_blueprint(exports.bp)
+    app.register_blueprint(coverage.bp)
+    app.register_blueprint(quality.bp)
 
 
 if __name__ == "__main__":

@@ -55,8 +55,15 @@ class ExportRequest(BaseModel):
         return value
 
 
+class CoverageAnalysisRequest(BaseModel):
+    """Validate coverage analysis requests."""
+
+    domain_id: int = Field(gt=0)
+
+
 __all__ = [
     "ChangeSetInput",
+    "CoverageAnalysisRequest",
     "DomainInput",
     "DraftRequest",
     "ExportRequest",

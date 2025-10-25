@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Quality Dashboard{% endblock %}
+
+{% block content %}
+<section class="quality-dashboard">
+    <h2>Quality Dashboard</h2>
+    <form method="get" class="quality-selector">
+        <label for="domain_id">Domain</label>
+        <select name="domain_id" id="domain_id" onchange="this.form.submit()">
+            {% for domain in domains %}
+                <option value="{{ domain.id }}" {% if selected_domain_id == domain.id %}selected{% endif %}>{{ domain.name }}</option>
+            {% endfor %}
+        </select>
+        <noscript>
+            <button type="submit">Analyze</button>
+        </noscript>
+    </form>
+
+    {% if report %}
+    <div class="coverage-summary">
+        <h3>Ontology Coverage for {{ report.domain_name }}</h3>
+        <div class="coverage-grid">
+            <div>
+                <h4>Entity Overlaps</h4>
+                {% if report.entity_overlaps %}
+                    <ul>
+                        {% for name in report.entity_overlaps %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No overlaps detected.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h4>Attribute Overlaps</h4>
+                {% if report.attribute_overlaps %}
+                    <ul>
+                        {% for name in report.attribute_overlaps %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No overlaps detected.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h4>Entity Collisions</h4>
+                {% if report.entity_collisions %}
+                    <ul class="issues">
+                        {% for name in report.entity_collisions %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No collisions found.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h4>Attribute Collisions</h4>
+                {% if report.attribute_collisions %}
+                    <ul class="issues">
+                        {% for name in report.attribute_collisions %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>No collisions found.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h4>Uncovered Ontology Entities</h4>
+                {% if report.uncovered_entities %}
+                    <ul class="gaps">
+                        {% for name in report.uncovered_entities %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>All ontology entities are represented.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h4>Uncovered Ontology Attributes</h4>
+                {% if report.uncovered_attributes %}
+                    <ul class="gaps">
+                        {% for name in report.uncovered_attributes %}
+                        <li>{{ name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>All ontology attributes are represented.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
