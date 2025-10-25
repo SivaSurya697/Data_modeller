@@ -62,9 +62,22 @@ class ModelingService:
         draft_messages = build_draft_messages(context, request.instructions)
         user_settings = get_user_settings(session, self._user_id)
         client = LLMClient(user_settings)
-        payload = client.generate_model_payload(prompt)
+        payload = client.generate_draft_payload(draft_messages)
+        critique_messages = build_critique_messages(
+            context, request.instructions, payload
+        )
+        critique_payload, amended_payload = client.generate_critique_payload(
+            critique_messages
+        )
+
+        final_payload = self._merge_payloads(payload, amended_payload)
+
+        critique_amendments = critique_payload.get("amendments")
+        if isinstance(critique_amendments, Mapping):
+            final_payload = self._merge_payloads(final_payload, critique_amendments)
+
         try:
-            payload_spec = ModelDraftPayload.model_validate(payload)
+            payload_spec = ModelDraftPayload.model_validate(final_payload)
         except ValidationError as exc:
             raise ValueError(
                 "Generated draft is missing required metadata; "
@@ -72,14 +85,8 @@ class ModelingService:
             ) from exc
 
         model = self._persist_model(
-            session, context, payload, payload_spec, request.instructions
+            session, context, final_payload, payload_spec, request.instructions
         )
-
-        amendments = critique_payload.get("amendments")
-        if isinstance(amendments, Mapping):
-            final_payload = self._merge_payloads(final_payload, amendments)
-
-        model = self._persist_model(session, context, final_payload, request.instructions)
 
         change_hints = final_payload.get("changes")
         if isinstance(change_hints, str):

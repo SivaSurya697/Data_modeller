@@ -114,6 +114,15 @@ def test_generate_draft_increments_versions_per_domain(session, monkeypatch):
     assert stub.draft_calls == 3
     assert stub.critique_calls == 3
 
+    customer = next(entity for entity in first.entities if entity.name == "Customer")
+    assert customer.role is EntityRole.DIMENSION
+    assert customer.scd_type is SCDType.TYPE_2
+    assert customer.grain_json == ["customer_id"]
+    attr_lookup = {attr.name: attr for attr in customer.attributes}
+    assert attr_lookup["customer_id"].is_surrogate_key is True
+    assert attr_lookup["customer_id"].is_measure is False
+    assert attr_lookup["email"].is_measure is False
+
 
 def test_generate_draft_applies_amendments_before_persisting(session, monkeypatch):
     draft_payload = {
@@ -139,18 +148,52 @@ def test_generate_draft_applies_amendments_before_persisting(session, monkeypatc
             {
                 "name": "Sale",
                 "role": "fact",
+                "grain": ["id"],
+                "scd_type": "none",
                 "attributes": [
-                    {"name": "id", "data_type": "int", "is_nullable": False},
-                    {"name": "client_id", "data_type": "int", "is_nullable": False},
-                    {"name": "total", "data_type": "decimal", "is_nullable": False},
+                    {
+                        "name": "id",
+                        "data_type": "int",
+                        "is_nullable": False,
+                        "is_measure": False,
+                        "is_surrogate_key": True,
+                    },
+                    {
+                        "name": "client_id",
+                        "data_type": "int",
+                        "is_nullable": False,
+                        "is_measure": False,
+                        "is_surrogate_key": False,
+                    },
+                    {
+                        "name": "total",
+                        "data_type": "decimal",
+                        "is_nullable": False,
+                        "is_measure": True,
+                        "is_surrogate_key": False,
+                    },
                 ],
             },
             {
                 "name": "Client",
                 "role": "dimension",
+                "grain": ["client_id"],
+                "scd_type": "type_1",
                 "attributes": [
-                    {"name": "client_id", "data_type": "int", "is_nullable": False},
-                    {"name": "email", "data_type": "string", "is_nullable": True},
+                    {
+                        "name": "client_id",
+                        "data_type": "int",
+                        "is_nullable": False,
+                        "is_measure": False,
+                        "is_surrogate_key": True,
+                    },
+                    {
+                        "name": "email",
+                        "data_type": "string",
+                        "is_nullable": True,
+                        "is_measure": False,
+                        "is_surrogate_key": False,
+                    },
                 ],
             },
         ],
@@ -198,15 +241,6 @@ def test_generate_draft_applies_amendments_before_persisting(session, monkeypatc
     relationship = result.relationships[0]
     assert relationship.from_entity.name == "Sale"
     assert relationship.to_entity.name == "Client"
-
-    customer = next(entity for entity in first.entities if entity.name == "Customer")
-    assert customer.role is EntityRole.DIMENSION
-    assert customer.scd_type is SCDType.TYPE_2
-    assert customer.grain_json == ["customer_id"]
-    attr_lookup = {attr.name: attr for attr in customer.attributes}
-    assert attr_lookup["customer_id"].is_surrogate_key is True
-    assert attr_lookup["customer_id"].is_measure is False
-    assert attr_lookup["email"].is_measure is False
 
 
 def test_generate_draft_requires_metadata(session, monkeypatch):
