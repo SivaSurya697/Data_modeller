@@ -21,7 +21,7 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 - Loads environment variables using `python-dotenv` and caches typed settings via `src/services/settings.load_settings`.
 - Configures the Flask app with shared settings and an `instance/` folder for local configuration.
-- Initialises the SQLAlchemy engine (`src/models/db.init_engine`) and ensures tables exist via `create_all()`.
+- Ensures database tables exist via `src/models/db.create_all()` using the pre-configured SQLAlchemy engine.
 - Sets up rate limiting with `flask-limiter` based on the configured requests-per-minute value.
 - Registers the feature blueprints:
   - `settings` – manage configuration overrides stored in the database.
@@ -42,8 +42,8 @@ The ORM models in `src/models/tables.py` define the storage schema:
 
 `src/models/db.py` provides:
 
-- `init_engine(url: str)` to configure the global SQLAlchemy engine.
-- `session_scope()` context manager wrapping a unit of work with commit/rollback semantics.
+- `engine` and `SessionLocal` configured from the application settings.
+- `get_db()` context manager yielding a unit of work with commit/rollback semantics.
 - `create_all()` to create tables on demand.
 
 ## Service layer
@@ -84,7 +84,7 @@ New exporters can be added by following the same signature and registering them 
 ## Request flow example: generating a draft
 
 1. A user submits the draft form from `templates/draft_review.html` handled by `src/api/model.py`.
-2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `session_scope()`.
+2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `get_db()`.
 3. `ModelingService.generate_draft()` loads domain context, builds a prompt, invokes the OpenAI client, persists the new `DataModel`, and evaluates impact.
 4. The blueprint commits the transaction, flashes a success message, and renders the updated draft alongside impact highlights.
 
@@ -99,7 +99,7 @@ New exporters can be added by following the same signature and registering them 
 
 - Form validation uses Pydantic models to prevent malformed inputs.
 - The LLM client raises a descriptive `ValueError` if the API key is missing or the response payload cannot be parsed.
-- `session_scope()` ensures transactions are rolled back on exceptions.
+- `get_db()` ensures transactions are rolled back on exceptions.
 - Rate limiting mitigates abusive traffic patterns.
 
 ## Extensibility guidelines

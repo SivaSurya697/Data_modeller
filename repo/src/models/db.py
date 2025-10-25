@@ -1,60 +1,36 @@
-"""Database session management utilities."""
+"""Database engine and session utilities."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
-from src.models.tables import Base
 from src.services.settings import load_settings
 
-_ENGINE: Engine | None = None
-_SESSION_FACTORY: scoped_session[Session] | None = None
+_settings = load_settings()
 
+engine = create_engine(_settings.database_url, future=True)
+"""SQLAlchemy engine bound to the configured database."""
 
-def init_engine(database_url: str | None = None) -> Engine:
-    """Initialise the SQLAlchemy engine and session factory."""
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+)
+"""Factory for creating database sessions."""
 
-    settings = load_settings()
-    url = database_url or settings.database_url
-    engine = create_engine(url, future=True)
-    session_factory = scoped_session(
-        sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
-    )
-
-    global _ENGINE  # noqa: PLW0603 - module level cache is intentional
-    global _SESSION_FACTORY  # noqa: PLW0603
-    _ENGINE = engine
-    _SESSION_FACTORY = session_factory
-    return engine
-
-
-def get_engine() -> Engine:
-    """Return the active SQLAlchemy engine."""
-
-    if _ENGINE is None:
-        return init_engine()
-    return _ENGINE
-
-
-def create_all() -> None:
-    """Create database tables based on the metadata."""
-
-    engine = get_engine()
-    Base.metadata.create_all(bind=engine)
+Base = declarative_base()
+"""Declarative base class for ORM models."""
 
 
 @contextmanager
-def session_scope() -> Iterator[Session]:
-    """Provide a transactional scope for database work."""
+def get_db() -> Iterator[Session]:
+    """Yield a database session ensuring transactional safety."""
 
-    if _SESSION_FACTORY is None:
-        init_engine()
-    assert _SESSION_FACTORY is not None  # For type-checkers
-    session = _SESSION_FACTORY()
+    session = SessionLocal()
     try:
         yield session
         session.commit()
@@ -63,3 +39,13 @@ def session_scope() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def create_all() -> None:
+    """Create database tables defined on the declarative base."""
+
+    # Import within the function to ensure all models are registered without
+    # creating circular import issues during module initialisation.
+    from src.models import tables  # noqa: WPS433 - imported for side effects only
+
+    Base.metadata.create_all(bind=engine)

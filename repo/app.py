@@ -10,7 +10,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from src.api import changesets, domains, exports, model, settings
-from src.models.db import create_all, init_engine
+from src.models.db import create_all
 from src.services.settings import load_settings
 
 
@@ -32,7 +32,6 @@ def create_app() -> Flask:
     config = load_settings()
     app.config["APP_SETTINGS"] = config
 
-    init_engine(config.database_url)
     create_all()
 
     outputs_dir = Path(__file__).resolve().parent / "outputs"

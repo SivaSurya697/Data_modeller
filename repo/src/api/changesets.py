@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from src.models.db import session_scope
+from src.models.db import get_db
 from src.models.tables import ChangeSet, DataModel
 from src.services.validators import ChangeSetInput
 
@@ -14,7 +14,7 @@ bp = Blueprint("changesets", __name__, url_prefix="/changesets")
 
 
 def _load_models() -> list[DataModel]:
-    with session_scope() as session:
+    with get_db() as session:
         models = list(
             session.execute(
                 select(DataModel).options(joinedload(DataModel.domain)).order_by(DataModel.name)
@@ -28,7 +28,7 @@ def index() -> str:
     """List changesets and provide creation form."""
 
     models = _load_models()
-    with session_scope() as session:
+    with get_db() as session:
         changesets = list(
             session.execute(
                 select(ChangeSet)
@@ -51,7 +51,7 @@ def create() -> str:
         flash(f"Invalid input: {exc}", "error")
         return redirect(url_for("changesets.index"))
 
-    with session_scope() as session:
+    with get_db() as session:
         model = session.get(DataModel, payload.model_id)
         if model is None:
             flash("Model not found.", "error")
