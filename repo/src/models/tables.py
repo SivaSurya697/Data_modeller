@@ -50,7 +50,10 @@ class Domain(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
     models: Mapped[list["DataModel"]] = relationship(
-        "DataModel", back_populates="domain", cascade="all, delete-orphan"
+        "DataModel",
+        back_populates="domain",
+        cascade="all, delete-orphan",
+        order_by="DataModel.version",
     )
     entities: Mapped[list["Entity"]] = relationship(
         "Entity", back_populates="domain", cascade="all, delete-orphan"
@@ -75,10 +78,15 @@ class DataModel(Base, TimestampMixin):
     domain_id: Mapped[int] = mapped_column(
         ForeignKey("domains.id", ondelete="CASCADE"), nullable=False
     )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     definition: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("domain_id", "version", name="uq_data_model_domain_version"),
+    )
 
     domain: Mapped[Domain] = relationship("Domain", back_populates="models")
 
