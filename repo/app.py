@@ -10,8 +10,8 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from src.api import changesets, domains, exports, model, settings
-from src.models.db import create_all, init_engine
-from src.services.settings import load_settings
+from src.models.db import create_all, init_engine, session_scope
+from src.services.settings import DEFAULT_USER_ID, get_user_settings
 
 
 def create_app() -> Flask:
@@ -29,17 +29,24 @@ def create_app() -> Flask:
     )
     app.secret_key = os.getenv("FLASK_SECRET_KEY", "change-me")
 
-    config = load_settings()
-    app.config["APP_SETTINGS"] = config
-
-    init_engine(config.database_url)
+    database_url = os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
+    init_engine(database_url)
     create_all()
 
     outputs_dir = Path(__file__).resolve().parent / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
     app.config["ARTIFACTS_DIR"] = str(outputs_dir)
 
-    rate_limit = f"{config.rate_limit_per_minute}/minute"
+    rate_limit_value = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    with session_scope() as session:
+        try:
+            user_settings = get_user_settings(session, DEFAULT_USER_ID)
+            rate_limit_value = user_settings.rate_limit_per_minute
+        except RuntimeError:
+            pass
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            app.logger.warning("Failed to load user settings: %s", exc)
+    rate_limit = f"{rate_limit_value}/minute"
     Limiter(
         key_func=get_remote_address,
         default_limits=[rate_limit],

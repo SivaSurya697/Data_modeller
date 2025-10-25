@@ -19,9 +19,9 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 ## Application bootstrap (`app.py`)
 
-- Loads environment variables using `python-dotenv` and caches typed settings via `src/services/settings.load_settings`.
+- Loads environment variables using `python-dotenv` and configures the database engine via `src/models/db.init_engine`.
 - Configures the Flask app with shared settings and an `instance/` folder for local configuration.
-- Initialises the SQLAlchemy engine (`src/models/db.init_engine`) and ensures tables exist via `create_all()`.
+- Ensures database tables exist via `src/models/db.create_all()` using the pre-configured SQLAlchemy engine.
 - Sets up rate limiting with `flask-limiter` based on the configured requests-per-minute value.
 - Registers the feature blueprints:
   - `settings` – manage configuration overrides stored in the database.
@@ -34,7 +34,7 @@ Browser ──▶ Flask blueprint ──▶ Service layer ──▶ ORM session 
 
 The ORM models in `src/models/tables.py` define the storage schema:
 
-- `Setting` – key/value configuration overrides persisted in the database.
+- `Settings` – per-user configuration including encrypted OpenAI credentials.
 - `Domain` – group of related data models.
 - `DataModel` – individual model drafts, including summary, markdown definition, and optional instructions.
 - `ChangeSet` – human-authored change notes tied to a `DataModel`.
@@ -42,15 +42,15 @@ The ORM models in `src/models/tables.py` define the storage schema:
 
 `src/models/db.py` provides:
 
-- `init_engine(url: str)` to configure the global SQLAlchemy engine.
-- `session_scope()` context manager wrapping a unit of work with commit/rollback semantics.
+- `engine` and `SessionLocal` configured from the application settings.
+- `get_db()` context manager yielding a unit of work with commit/rollback semantics.
 - `create_all()` to create tables on demand.
 
 ## Service layer
 
 ### Configuration (`src/services/settings.py`)
 
-`AppSettings` is a Pydantic model that normalises environment variables. The `load_settings()` function caches a single instance per process, ensuring consistent configuration throughout requests.
+`save_user_settings()` persists encrypted API credentials for a user, while `get_user_settings()` decrypts and returns them as a `UserSettings` dataclass. Both helpers operate on a SQLAlchemy session and rely on a Fernet key supplied via the `SETTINGS_ENCRYPTION_KEY` environment variable.
 
 ### Prompt context (`src/services/context_builder.py`)
 
@@ -84,7 +84,7 @@ New exporters can be added by following the same signature and registering them 
 ## Request flow example: generating a draft
 
 1. A user submits the draft form from `templates/draft_review.html` handled by `src/api/model.py`.
-2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `session_scope()`.
+2. The blueprint validates input via `DraftRequest` and opens a SQLAlchemy session using `get_db()`.
 3. `ModelingService.generate_draft()` loads domain context, builds a prompt, invokes the OpenAI client, persists the new `DataModel`, and evaluates impact.
 4. The blueprint commits the transaction, flashes a success message, and renders the updated draft alongside impact highlights.
 
@@ -99,7 +99,7 @@ New exporters can be added by following the same signature and registering them 
 
 - Form validation uses Pydantic models to prevent malformed inputs.
 - The LLM client raises a descriptive `ValueError` if the API key is missing or the response payload cannot be parsed.
-- `session_scope()` ensures transactions are rolled back on exceptions.
+- `get_db()` ensures transactions are rolled back on exceptions.
 - Rate limiting mitigates abusive traffic patterns.
 
 ## Extensibility guidelines
