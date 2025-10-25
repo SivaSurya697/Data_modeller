@@ -11,9 +11,11 @@ from flask_limiter.util import get_remote_address
 
 from src.api import (
     changesets,
+    coverage,
     domains,
     exports,
     model,
+    quality,
     relationships,
     settings,
     sources,
@@ -84,7 +86,9 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(model.bp)
     app.register_blueprint(relationships.bp)
     app.register_blueprint(changesets.bp)
+    app.register_blueprint(coverage.bp)
     app.register_blueprint(exports.bp)
+    app.register_blueprint(quality.bp)
     app.register_blueprint(sources.bp)
     app.register_blueprint(sources.ui_bp)
 
