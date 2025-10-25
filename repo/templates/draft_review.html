@@ -74,6 +74,31 @@
         <p>No dimension entities were produced.</p>
     {% endif %}
 </section>
+<section>
+    <h3>Mappings</h3>
+    <form
+        id="mapping-autoplan"
+        class="mapping-autoplan"
+        hx-post="/api/mappings/autoplan"
+        hx-target="#mapping-results"
+        hx-swap="innerHTML"
+        method="post"
+    >
+        <label for="mapping-entity-id">Entity ID</label>
+        <input
+            type="number"
+            id="mapping-entity-id"
+            name="entity_id"
+            min="1"
+            placeholder="Enter the entity ID to map"
+            required
+        />
+        <button type="submit">Autoplan Mappings</button>
+    </form>
+    <div id="mapping-results" class="mapping-results">
+        <p class="muted">Run autoplan to review mapping suggestions.</p>
+    </div>
+</section>
 {% if draft.other_entities %}
 <section>
     <h3>Other Entities</h3>
