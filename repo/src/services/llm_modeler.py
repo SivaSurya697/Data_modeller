@@ -78,6 +78,7 @@ class ModelingService:
             model=model,
             version=model.version,
             entities=model.domain.entities,
+            relationships=relationships,
             impact=impact,
         )
 
@@ -146,12 +147,15 @@ class ModelingService:
                     continue
                 entity_name = str(item.get("name") or f"{domain.name} Entity {index}").strip()
                 role_value = item.get("role") or item.get("entity_role")
-                entity_role = self._coerce_enum(
-                    role_value,
-                    enum_cls=EntityRole,
-                    field_name="role",
-                    context=f"Entity '{entity_name}'",
-                )
+                if role_value is None or str(role_value).strip() == "":
+                    entity_role = EntityRole.UNKNOWN
+                else:
+                    entity_role = self._coerce_enum(
+                        role_value,
+                        enum_cls=EntityRole,
+                        field_name="role",
+                        context=f"Entity '{entity_name}'",
+                    )
                 entity = Entity(
                     domain=domain,
                     name=entity_name,
