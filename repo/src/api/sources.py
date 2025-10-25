@@ -12,7 +12,7 @@ from src.models.tables import SourceColumn, SourceSystem, SourceTable
 from src.services.source_registry import SourceRegistryService
 from src.services.validators import SourceImportRequest, SourceProfileRequest
 
-bp = Blueprint("sources_api", __name__, url_prefix="/api/sources")
+bp = Blueprint("sources_api", __name__)
 ui_bp = Blueprint("sources", __name__, url_prefix="/sources")
 
 _service = SourceRegistryService()
