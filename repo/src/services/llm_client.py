@@ -6,7 +6,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from src.services.settings import AppSettings
+from src.services.settings import UserSettings
 
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
 
@@ -14,9 +14,9 @@ DEFAULT_MODEL_NAME = "gpt-4o-mini"
 class LLMClient:
     """Typed wrapper for invoking the OpenAI client."""
 
-    def __init__(self, settings: AppSettings, model_name: str = DEFAULT_MODEL_NAME) -> None:
+    def __init__(self, settings: UserSettings, model_name: str = DEFAULT_MODEL_NAME) -> None:
         if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is not configured")
+            raise ValueError("OPENAI_API_KEY is not configured for this user")
         self._settings = settings
         self._model_name = model_name
         self._client = OpenAI(
