@@ -44,69 +44,153 @@
         </button>
     </section>
 
-    <section class="card">
-        <header>
-            <h3>All Sources</h3>
-            <p class="muted">Select a table to review the most recent profiling statistics.</p>
-        </header>
-        {% if sources %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th scope="col">Source</th>
-                        <th scope="col">Table</th>
-                        <th scope="col">Row count</th>
-                        <th scope="col">Profiled</th>
-                        <th scope="col" class="actions">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for source in sources %}
-                        {% if source.tables %}
-                            {% for table in source.tables %}
-                                <tr>
-                                    <td data-label="Source">
-                                        <strong>{{ source.name }}</strong><br>
-                                        <span class="muted">{{ source.connection_type }}</span>
-                                    </td>
-                                    <td data-label="Table">
-                                        {{ table.schema_name }}.{{ table.table_name }}
-                                        {% if table.display_name %}
-                                            <span class="muted">({{ table.display_name }})</span>
-                                        {% endif %}
-                                    </td>
-                                    <td data-label="Row count">{{ table.row_count or "Unknown" }}</td>
-                                    <td data-label="Profiled">{{ table.profiled_at or "Never" }}</td>
-                                    <td data-label="Actions">
-                                        <button
-                                            type="button"
-                                            class="secondary"
-                                            hx-post="/api/sources/profile"
-                                            hx-vals='{"table_id": {{ table.id }}}'
-                                            hx-target="#source-detail"
-                                            hx-swap="innerHTML"
-                                        >
-                                            View profile
-                                        </button>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td data-label="Source">
-                                    <strong>{{ source.name }}</strong>
-                                </td>
-                                <td colspan="4" class="muted">No tables imported.</td>
-                            </tr>
-                        {% endif %}
+<section>
+    <form id="profileForm" novalidate>
+        <h3>Profile a table</h3>
+        <p class="form-help">Choose a table and provide sampled rows to calculate descriptive statistics.</p>
+        <label for="profileTable">Table</label>
+        <select id="profileTable" name="table_id">
+            {% if sources %}
+                {% for system in sources %}
+                    {% for table in system.tables %}
+                        <option value="{{ table.id }}">{{ system.name }} · {{ table.schema_name }}.{{ table.table_name }}</option>
                     {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <p class="muted">No sources have been imported.</p>
-        {% endif %}
-    </section>
-</div>
+                {% endfor %}
+            {% else %}
+                <option value="" disabled selected>No tables available</option>
+            {% endif %}
+        </select>
+        <label for="profileRows">Sample rows (JSON array)</label>
+        <textarea id="profileRows" rows="8">[
+    {"ORDER_ID": 1, "STATUS": "NEW", "AMOUNT": 100.0},
+    {"ORDER_ID": 2, "STATUS": "SHIPPED", "AMOUNT": 150.5},
+    {"ORDER_ID": 3, "STATUS": "NEW", "AMOUNT": 200.0}
+]</textarea>
+        <label for="profileTotalRows">Total rows (optional)</label>
+        <input type="number" id="profileTotalRows" min="0" step="1" placeholder="Leave blank to keep existing" />
+        <button type="submit">Profile table</button>
+        <pre id="profileFeedback" class="feedback" aria-live="polite"></pre>
+    </form>
+</section>
+
+<section class="source-list">
+    <h3>Registered sources</h3>
+    {% if sources %}
+        {% for system in sources %}
+            <article class="source-system">
+                <header>
+                    <h4>{{ system.name }}</h4>
+                    <span class="source-connection">{{ system.connection_type }}</span>
+                </header>
+                {% if system.description %}
+                    <p>{{ system.description }}</p>
+                {% endif %}
+                <dl>
+                    <dt>Last import</dt>
+                    <dd>{{ system.last_imported_at or "Never" }}</dd>
+                    <dt>Tables</dt>
+                    <dd>{{ system.tables|length }}</dd>
+                </dl>
+                {% if system.tables %}
+                    <div class="source-tables">
+                        {% for table in system.tables %}
+                            <details>
+                                <summary>{{ table.schema_name }}.{{ table.table_name }}{% if table.display_name %} ({{ table.display_name }}){% endif %}</summary>
+                                {% if table.description %}
+                                    <p>{{ table.description }}</p>
+                                {% endif %}
+                                <dl>
+                                    <dt>Row count</dt>
+                                    <dd>{{ table.row_count or "Unknown" }}</dd>
+                                    <dt>Sampled rows</dt>
+                                    <dd>{{ table.sampled_row_count or 0 }}</dd>
+                                    <dt>Profiled</dt>
+                                    <dd>{{ table.profiled_at or "Never" }}</dd>
+                                </dl>
+                                {% if table.columns %}
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Type</th>
+                                                <th>Nullable</th>
+                                                <th>Statistics</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for column in table.columns %}
+                                                <tr>
+                                                    <td>{{ column.name }}</td>
+                                                    <td>{{ column.data_type or "Unknown" }}</td>
+                                                    <td>{{ "Yes" if column.is_nullable else "No" }}</td>
+                                                    <td>
+                                                        {% if column.statistics %}
+                                                            <code>{{ column.statistics }}</code>
+                                                        {% else %}
+                                                            <span class="muted">No statistics</span>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                {% else %}
+                                    <p class="muted">No columns captured yet.</p>
+                                {% endif %}
+                            </details>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="muted">No tables imported.</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+    {% else %}
+        <p class="muted">No sources have been imported.</p>
+    {% endif %}
+</section>
+
+<script>
+(function () {
+    function renderFeedback(element, content, isError) {
+        if (!element) return;
+        element.textContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+        element.classList.toggle('error', Boolean(isError));
+    }
+
+    async function postJson(url, payload, feedbackEl) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                renderFeedback(feedbackEl, data.error || data, true);
+            } else {
+                renderFeedback(feedbackEl, 'Success. Reloading…', false);
+                window.setTimeout(() => window.location.reload(), 600);
+            }
+        } catch (error) {
+            renderFeedback(feedbackEl, error.message, true);
+        }
+    }
+
+    const importForm = document.getElementById('importForm');
+    if (importForm) {
+        importForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const textarea = document.getElementById('importPayload');
+            const feedbackEl = document.getElementById('importFeedback');
+            try {
+                const payload = JSON.parse(textarea.value || '{}');
+                postJson('/api/sources/import', payload, feedbackEl);
+            } catch (error) {
+                renderFeedback(feedbackEl, 'Invalid JSON payload: ' + error.message, true);
+            }
+        });
+    }
 
 <section id="source-detail" class="card"></section>
 {% endblock %}
