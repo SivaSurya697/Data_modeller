@@ -6,8 +6,9 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 from sqlalchemy import select
 
-from src.models.db import session_scope
+from src.models.db import get_db
 from src.models.tables import Domain
+from src.services.form_validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/api/domains")
 
@@ -42,8 +43,15 @@ def _parse_domain_names(payload: Any) -> list[str]:
 def list_domains():
     """Return all domains in the system."""
 
-    with session_scope() as session:
-        domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
+    with get_db() as session:
+        domains = list(
+            session.execute(
+                select(Domain)
+                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                .order_by(Domain.name)
+            ).scalars()
+        )
+    return render_template("domains.html", domains=domains)
 
     payload = {
         "domains": [
@@ -67,30 +75,14 @@ def import_domains():
     if data is None:
         return jsonify({"ok": False, "error": "Invalid JSON payload."}), 400
 
-    try:
-        domain_names = _parse_domain_names(data)
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-
-    created: list[str] = []
-    with session_scope() as session:
-        existing_names = set(
-            session.execute(
-                select(Domain.name).where(Domain.name.in_(domain_names))
-            ).scalars()
-        )
-
-        for name in domain_names:
-            if name in existing_names:
-                continue
-            session.add(
-                Domain(
-                    name=name,
-                    description="",
-                    status="published",
-                    version="0.0.0",
-                )
-            )
-            created.append(name)
-
-    return jsonify({"ok": True, "created": created})
+    with get_db() as session:
+        existing = session.execute(
+            select(Domain).where(Domain.name == name)
+        ).scalar_one_or_none()
+        if existing:
+            flash("Domain already exists.", "error")
+            return redirect(url_for("domains.index"))
+        domain = Domain(name=name, description=description)
+        session.add(domain)
+        flash("Domain created.", "success")
+    return redirect(url_for("domains.index"))

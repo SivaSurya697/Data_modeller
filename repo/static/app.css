@@ -89,6 +89,44 @@ button:hover {
     opacity: 0.9;
 }
 
+.impact-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2rem;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.impact-table th,
+.impact-table td {
+    border: 1px solid #d5d8dc;
+    padding: 0.75rem;
+    text-align: left;
+}
+
+.impact-table th {
+    background-color: #1b4f72;
+    color: #fff;
+}
+
+.impact-level {
+    font-weight: 600;
+}
+
+.impact-low {
+    color: #1d8348;
+}
+
+.impact-medium {
+    color: #b9770e;
+}
+
+.impact-high {
+    color: #922b21;
+}
+
 .alert {
     padding: 1rem;
     border-radius: 4px;
