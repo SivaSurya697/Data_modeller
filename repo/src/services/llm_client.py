@@ -1,14 +1,15 @@
 """Wrapper around the OpenAI Chat Completions API."""
 from __future__ import annotations
 
-import json
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from openai import OpenAI
 
 from src.services.settings import AppSettings
 
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
+
+ChatMessage = Mapping[str, str]
 
 
 class LLMClient:
@@ -24,28 +25,37 @@ class LLMClient:
             base_url=settings.openai_base_url,
         )
 
-    def generate_model_payload(self, prompt: str) -> dict[str, Any]:
-        """Call the chat completions endpoint and parse the JSON payload."""
+    def chat_complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        temperature: float = 0.1,
+        response_format: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Invoke the chat completions API and return the raw content string."""
 
         response = self._client.chat.completions.create(
             model=self._model_name,
-            temperature=0.1,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior data modeller. Provide concise JSON outputs "
-                        "containing name, summary, definition (markdown allowed), and "
-                        "an optional changes array describing deltas."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
+            temperature=temperature,
+            response_format=response_format,
+            messages=list(messages),
         )
-        content = response.choices[0].message.content or "{}"
-        try:
-            payload: dict[str, Any] = json.loads(content)
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-            raise ValueError("Model response was not valid JSON") from exc
-        return payload
+        return response.choices[0].message.content or ""
+
+
+def chat_complete(
+    settings: AppSettings,
+    messages: Sequence[ChatMessage],
+    *,
+    model_name: str | None = None,
+    temperature: float = 0.1,
+    response_format: Mapping[str, Any] | None = None,
+) -> str:
+    """Convenience helper to run a chat completion using the configured settings."""
+
+    client = LLMClient(settings, model_name=model_name or DEFAULT_MODEL_NAME)
+    return client.chat_complete(
+        messages,
+        temperature=temperature,
+        response_format=response_format,
+    )
