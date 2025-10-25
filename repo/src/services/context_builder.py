@@ -37,11 +37,15 @@ class DomainContext:
                 )
             sections.append("Existing Models:\n" + "\n\n".join(model_lines))
         if self.changes:
-            change_lines = "\n".join(
-                f"- {change.created_at:%Y-%m-%d}: {change.description}"
-                for change in self.changes
-            )
-            sections.append(f"Recent Changes:\n{change_lines}")
+            change_lines: list[str] = []
+            for change in self.changes:
+                summary = change.title
+                if change.description:
+                    summary = f"{summary} — {change.description}"
+                change_lines.append(
+                    f"- {change.created_at:%Y-%m-%d} [{change.state}] {summary}"
+                )
+            sections.append(f"Recent Changes:\n" + "\n".join(change_lines))
         return sections
 
 

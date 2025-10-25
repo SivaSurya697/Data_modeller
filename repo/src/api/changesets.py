@@ -1,16 +1,21 @@
-"""Changeset endpoints."""
+"""API endpoints for working with change sets."""
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from pydantic import ValidationError
+from http import HTTPStatus
+
+from flask import Blueprint, request
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
 
 from src.models.db import get_db
 from src.models.tables import ChangeSet, DataModel
 from src.services.validators import ChangeSetInput
 
-bp = Blueprint("changesets", __name__, url_prefix="/changesets")
+    header_candidates = ("X-User", "X-User-Email", "X-User-Id")
+    for header in header_candidates:
+        value = request.headers.get(header)
+        if value:
+            return value
+    return "system"
 
 
 def _load_models() -> list[DataModel]:
@@ -23,17 +28,15 @@ def _load_models() -> list[DataModel]:
     return models
 
 
-@bp.route("/", methods=["GET"])
-def index() -> str:
-    """List changesets and provide creation form."""
+@bp.get("/")
+def index() -> tuple[list[dict[str, object]], int]:
+    """Return a list of change sets with minimal metadata."""
 
     models = _load_models()
     with get_db() as session:
         changesets = list(
             session.execute(
-                select(ChangeSet)
-                .options(joinedload(ChangeSet.model).joinedload(DataModel.domain))
-                .order_by(ChangeSet.created_at.desc())
+                select(ChangeSet).order_by(ChangeSet.created_at.desc())
             ).scalars()
         )
     return render_template(

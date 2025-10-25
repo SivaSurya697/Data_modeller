@@ -80,10 +80,15 @@ class ChangeSet(Base):
     __tablename__ = "changesets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    data_model_id: Mapped[int] = mapped_column(
-        ForeignKey("data_models.id"), nullable=False
+    data_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_models.id"), nullable=True
     )
-    description: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="draft"
+    )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
