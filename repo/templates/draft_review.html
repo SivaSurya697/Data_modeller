@@ -19,35 +19,21 @@
 
 {% if draft %}
 <section>
-    <h3>Draft Summary</h3>
-    <p>Version {{ draft.version }}</p>
-</section>
-<section>
-    <h3>Fact Entities</h3>
-    {% if draft.facts %}
-        {% for entity in draft.facts %}
-            <article class="card">
-                <h4>{{ entity.name }}</h4>
-                {% if entity.description %}<p>{{ entity.description }}</p>{% endif %}
-                {% if entity.documentation %}<pre>{{ entity.documentation }}</pre>{% endif %}
-                {% if entity.attributes %}
-                    <h5>Attributes</h5>
-                    <ul>
-                        {% for attribute in entity.attributes %}
-                            <li>{{ attribute.name }}{% if attribute.data_type %} ({{ attribute.data_type }}){% endif %}{% if not attribute.is_nullable %} – required{% endif %}{% if attribute.description %}: {{ attribute.description }}{% endif %}</li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-            </article>
-        {% endfor %}
-    {% else %}
-        <p>No fact entities were produced.</p>
+    <h3>Draft Metadata</h3>
+    <p><strong>Version:</strong> v{{ draft.version }}</p>
+    <p><strong>Name:</strong> {{ draft.model.name }}</p>
+    <p><strong>Summary:</strong> {{ draft.model.summary }}</p>
+    {% if draft.model.instructions %}
+        <details>
+            <summary>Additional instructions</summary>
+            <pre>{{ draft.model.instructions }}</pre>
+        </details>
     {% endif %}
 </section>
 <section>
-    <h3>Dimension Entities</h3>
-    {% if draft.dimensions %}
-        {% for entity in draft.dimensions %}
+    <h3>Draft Entities</h3>
+    {% if draft.entities %}
+        {% for entity in draft.entities %}
             <article class="card">
                 <h4>{{ entity.name }}</h4>
                 {% if entity.description %}<p>{{ entity.description }}</p>{% endif %}

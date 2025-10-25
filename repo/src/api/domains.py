@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.models.db import get_db
-from src.models.tables import Domain, Entity
+from src.models.tables import Domain, Entity, ReviewTask
+from src.services.impact_cross_domain import identify_impacted_domains
 from src.services.validators import DomainInput
 
 bp = Blueprint("domains", __name__, url_prefix="/domains")
@@ -18,7 +19,10 @@ def _load_domains() -> list[Domain]:
     with get_db() as session:
         stmt = (
             select(Domain)
-            .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+            .options(
+                joinedload(Domain.entities).joinedload(Entity.attributes),
+                joinedload(Domain.created_review_tasks).joinedload(ReviewTask.target_domain),
+            )
             .order_by(Domain.name)
         )
         domains = list(session.scalars(stmt).unique())
@@ -50,7 +54,32 @@ def index():
             if existing:
                 flash("Domain already exists.", "error")
             else:
-                session.add(Domain(name=name, description=description))
+                new_domain = Domain(name=name, description=description)
+                session.add(new_domain)
+                session.flush()
+
+                existing_domains = (
+                    session.execute(
+                        select(Domain)
+                        .options(joinedload(Domain.entities))
+                        .where(Domain.id != new_domain.id)
+                    )
+                    .scalars()
+                    .unique()
+                    .all()
+                )
+
+                findings = identify_impacted_domains(new_domain, existing_domains)
+                for finding in findings:
+                    session.add(
+                        ReviewTask(
+                            source_domain=new_domain,
+                            target_domain=finding.target_domain,
+                            title=finding.title,
+                            details=finding.details,
+                        )
+                    )
+
                 flash("Domain created.", "success")
         return redirect(url_for("domains.index"))
 

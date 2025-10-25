@@ -11,7 +11,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app import create_app
 from src.models import db as db_module
-from src.models.tables import Attribute, Domain, Entity, ExportRecord
+from src.models.tables import Attribute, DataModel, Domain, Entity, ExportRecord
 
 
 @pytest.fixture
@@ -44,6 +44,13 @@ def test_exports_post_handles_eager_loaded_collections(client, session):
     entity = Entity(name="Report", description="", domain=domain)
     Attribute(name="title", data_type="string", entity=entity)
     Attribute(name="owner", data_type="string", entity=entity)
+    DataModel(
+        domain=domain,
+        version=1,
+        name="Analytics Model",
+        summary="A model for analytics",
+        definition="Definition",
+    )
     session.add(domain)
     session.commit()
 
@@ -58,3 +65,7 @@ def test_exports_post_handles_eager_loaded_collections(client, session):
     session.expire_all()
     records = session.query(ExportRecord).all()
     assert len(records) == 1
+    export_path = Path(records[0].file_path)
+    assert export_path.exists()
+    content = export_path.read_text(encoding="utf-8")
+    assert "Latest model version: v1" in content

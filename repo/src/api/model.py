@@ -97,7 +97,12 @@ def draft_review():
         try:
             with get_db() as session:
                 result = service.generate_draft(session, payload)
-                draft = _build_draft_view_model(result)
+                draft = {
+                    "model": result.model,
+                    "version": result.version,
+                    "entities": result.entities,
+                    "impact": result.impact,
+                }
             flash("Draft generated successfully.", "success")
         except Exception as exc:  # pragma: no cover - surface to UI
             flash(f"Draft generation failed: {exc}", "error")

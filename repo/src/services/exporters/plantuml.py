@@ -49,18 +49,13 @@ def export_plantuml(domain: Domain, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"{slugify(domain.name)}.puml"
 
-    version = infer_model_version(domain)
+    latest_version = max((model.version for model in domain.models), default=None)
+    title = domain.name if latest_version is None else f"{domain.name} (v{latest_version})"
 
     lines: list[str] = [
         "@startuml",
         "skinparam classAttributeIconSize 0",
-        "skinparam class {",
-        "  BackgroundColor<<Fact>> #FFF2CC",
-        "  BackgroundColor<<Dimension>> #D9E8FB",
-        "  BorderColor<<Fact>> #A56800",
-        "  BorderColor<<Dimension>> #2B579A",
-        "}",
-        f"title {domain.name} (v{version})",
+        f"title {title}",
     ]
 
     grouped_entities: dict[str, list[list[str]]] = {"fact": [], "dimension": [], "other": []}

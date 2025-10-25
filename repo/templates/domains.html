@@ -17,6 +17,7 @@
         <th>Name</th>
         <th>Description</th>
         <th>Entities</th>
+        <th>Review tasks</th>
     </tr>
     </thead>
     <tbody>
@@ -33,6 +34,21 @@
                     </ul>
                 {% else %}
                     No entities yet.
+                {% endif %}
+            </td>
+            <td>
+                {% if domain.created_review_tasks %}
+                    <ul class="review-tasks">
+                        {% for task in domain.created_review_tasks %}
+                            <li>
+                                <strong>{{ task.title }}</strong>
+                                <div class="task-target">Impacted domain: {{ task.target_domain.name }}</div>
+                                <p>{{ task.details }}</p>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    No review tasks generated.
                 {% endif %}
             </td>
         </tr>
