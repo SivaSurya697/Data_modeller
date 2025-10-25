@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.models.tables import ChangeSet, DataModel, Domain
 
@@ -14,8 +14,9 @@ class DomainContext:
     """Container for context sent to the language model."""
 
     domain: Domain
-    models: list[DataModel]
-    settings: dict[str, str]
+    entities: list[Entity]
+    relationships: list[Relationship]
+    settings: Setting | None
     changes: list[ChangeSet]
 
     def to_prompt_sections(self) -> list[str]:
@@ -25,17 +26,46 @@ class DomainContext:
             f"Domain: {self.domain.name}\nDescription: {self.domain.description}"
         ]
         if self.settings:
-            setting_lines = "\n".join(
-                f"- {key}: {value}" for key, value in sorted(self.settings.items())
-            )
-            sections.append(f"Operational Settings:\n{setting_lines}")
-        if self.models:
-            model_lines = []
-            for model in self.models:
-                model_lines.append(
-                    f"Model: {model.name}\nSummary: {model.summary}\nDefinition:\n{model.definition}"
+            details = list(
+                filter(
+                    None,
+                    [
+                        f"- Base URL: {self.settings.base_url}" if self.settings.base_url else None,
+                        f"- Model name: {self.settings.model_name}" if self.settings.model_name else None,
+                        "- API key configured" if self.settings.api_key_enc else None,
+                    ],
                 )
-            sections.append("Existing Models:\n" + "\n\n".join(model_lines))
+            )
+            if not details:
+                details = ["- No overrides configured."]
+            sections.append("Operational Settings:\n" + "\n".join(details))
+        if self.entities:
+            entity_lines: list[str] = []
+            for entity in self.entities:
+                description = entity.description or "No description captured."
+                documentation = (entity.documentation or "").strip()
+                attribute_lines = [
+                    f"  - {attribute.name} ({attribute.data_type or 'unspecified'})"
+                    + (f" – {attribute.description}" if attribute.description else "")
+                    for attribute in entity.attributes
+                ]
+                block_parts = [
+                    f"Entity: {entity.name}",
+                    f"Description: {description}",
+                ]
+                if documentation:
+                    block_parts.append(f"Documentation:\n{documentation}")
+                if attribute_lines:
+                    block_parts.append("Attributes:\n" + "\n".join(attribute_lines))
+                entity_lines.append("\n".join(block_parts))
+            sections.append("Existing Entities:\n" + "\n\n".join(entity_lines))
+        if self.relationships:
+            rel_lines = [
+                f"- {rel.from_entity.name} {rel.relationship_type} {rel.to_entity.name}"
+                + (f" – {rel.description}" if rel.description else "")
+                for rel in self.relationships
+            ]
+            sections.append("Existing Relationships:\n" + "\n".join(rel_lines))
         if self.changes:
             change_lines: list[str] = []
             for change in self.changes:
@@ -52,26 +82,39 @@ class DomainContext:
 def load_context(session: Session, domain_id: int) -> DomainContext:
     """Load all relevant context for a domain."""
 
-    domain = session.get(Domain, domain_id)
+    domain = session.execute(
+        select(Domain)
+        .where(Domain.id == domain_id)
+        .options(
+            joinedload(Domain.entities).joinedload(Entity.attributes),
+            joinedload(Domain.relationships).joinedload(Relationship.from_entity),
+            joinedload(Domain.relationships).joinedload(Relationship.to_entity),
+        )
+    ).scalar_one_or_none()
     if domain is None:
         raise ValueError("Domain not found")
 
-    models = list(
-        session.execute(
-            select(DataModel).where(DataModel.domain_id == domain_id).order_by(DataModel.updated_at.desc())
-        ).scalars()
+    entities = sorted(domain.entities, key=lambda item: item.name.lower())
+    relationships = sorted(
+        domain.relationships,
+        key=lambda rel: (rel.from_entity.name.lower(), rel.to_entity.name.lower(), rel.relationship_type),
     )
     settings: dict[str, str] = {}
     changes = list(
         session.execute(
             select(ChangeSet)
-            .join(DataModel)
-            .where(DataModel.domain_id == domain_id)
+            .where(ChangeSet.domain_id == domain_id)
             .order_by(ChangeSet.created_at.desc())
         ).scalars()
     )
 
-    return DomainContext(domain=domain, models=models, settings=settings, changes=changes)
+    return DomainContext(
+        domain=domain,
+        entities=entities,
+        relationships=relationships,
+        settings=settings,
+        changes=changes,
+    )
 
 
 def build_prompt(context: DomainContext, instructions: str | None = None) -> str:
@@ -81,6 +124,10 @@ def build_prompt(context: DomainContext, instructions: str | None = None) -> str
     if instructions:
         sections.append(f"Additional Instructions:\n{instructions.strip()}")
     sections.append(
-        "Respond using JSON with keys 'name', 'summary', 'definition' and optional 'changes'."
+        "Respond using JSON with a top-level 'entities' array. Each entity should"
+        " include 'name', optional 'description', optional 'documentation', and an"
+        " 'attributes' array with 'name', optional 'data_type', optional 'description',"
+        " and 'is_nullable'. Include optional 'relationships' linking entity names,"
+        " and a 'changes' array of review notes if applicable."
     )
     return "\n\n".join(sections)

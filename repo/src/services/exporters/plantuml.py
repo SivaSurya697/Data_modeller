@@ -6,33 +6,56 @@ from typing import Any, Mapping
 
 from slugify import slugify
 
-from src.services.exporters.utils import prepare_artifact_path
+from src.models.tables import Domain, Entity
 
 
-def emit_plantuml(model: Mapping[str, Any], artifacts_dir: Path) -> Path:
-    """Generate a PlantUML class diagram stub from a model payload."""
+def _class_name(entity: Entity) -> str:
+    """Derive a PlantUML friendly class identifier."""
 
-    name = _extract_name(model)
-    domain_name = _extract_domain_name(model)
-    definition = str(model.get("definition") or "").strip()
+    token = slugify(entity.name, separator="_")
+    return token or f"entity_{entity.id}"
 
-    filename = f"{_slug(name)}.puml"
-    file_path = prepare_artifact_path(artifacts_dir, filename)
 
-    definition_lines = [
-        f"' {line}" for line in definition.splitlines() if line.strip()
+def export_plantuml(domain: Domain, output_dir: Path) -> Path:
+    """Generate a PlantUML class diagram for a domain."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = output_dir / f"{slugify(domain.name)}.puml"
+
+    lines: list[str] = [
+        "@startuml",
+        "skinparam classAttributeIconSize 0",
+        f"title {domain.name}",
     ]
-    content = "\n".join(
-        [
-            "@startuml",
-            "skinparam classAttributeIconSize 0",
-            f"title {name}{f' ({domain_name})' if domain_name else ''}",
-            "' Model definition excerpt:",
-            *definition_lines,
-            "@enduml",
-        ]
+
+    entities = sorted(domain.entities, key=lambda item: item.name.lower())
+    for entity in entities:
+        class_name = _class_name(entity)
+        lines.append(f"class {class_name} {{")
+        if entity.description:
+            for description_line in entity.description.splitlines():
+                lines.append(f"  ' {description_line}")
+        for attribute in sorted(entity.attributes, key=lambda item: item.name.lower()):
+            data_type = attribute.data_type or "unspecified"
+            nullable = "?" if attribute.is_nullable else "!"
+            lines.append(f"  {attribute.name}: {data_type} {nullable}")
+        lines.append("}")
+
+    relationships = sorted(
+        domain.relationships,
+        key=lambda rel: (rel.from_entity.name.lower(), rel.to_entity.name.lower(), rel.relationship_type),
     )
-    file_path.write_text(content, encoding="utf-8")
+    for relationship in relationships:
+        left = _class_name(relationship.from_entity)
+        right = _class_name(relationship.to_entity)
+        label = relationship.relationship_type or "relates to"
+        lines.append(f"{left} --> {right} : {label}")
+        if relationship.description:
+            for description_line in relationship.description.splitlines():
+                lines.append(f"' {description_line}")
+
+    lines.append("@enduml")
+    file_path.write_text("\n".join(lines), encoding="utf-8")
     return file_path
 
 
