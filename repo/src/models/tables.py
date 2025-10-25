@@ -123,6 +123,15 @@ class EntityRole(str, Enum):
     UNKNOWN = "unknown"
 
 
+class SCDType(str, Enum):
+    """Slowly changing dimension strategies supported by the modeller."""
+
+    NONE = "none"
+    TYPE_0 = "type_0"
+    TYPE_1 = "type_1"
+    TYPE_2 = "type_2"
+
+
 class Entity(Base, TimestampMixin):
     """Entity representing a conceptual object within a domain."""
 
@@ -135,11 +144,20 @@ class Entity(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     documentation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    entity_role: Mapped[EntityRole] = mapped_column(
+    role: Mapped[EntityRole] = mapped_column(
         SAEnum(EntityRole, name="entity_role_enum", validate_strings=True),
         nullable=False,
         default=EntityRole.UNKNOWN,
         server_default=EntityRole.UNKNOWN.value,
+    )
+    grain_json: Mapped[list[str] | dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    scd_type: Mapped[SCDType] = mapped_column(
+        SAEnum(SCDType, name="scd_type_enum", validate_strings=True),
+        nullable=False,
+        default=SCDType.NONE,
+        server_default=SCDType.NONE.value,
     )
 
     __table_args__ = (UniqueConstraint("domain_id", "name", name="uq_entity_domain_name"),)
@@ -175,6 +193,8 @@ class Attribute(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_nullable: Mapped[bool] = mapped_column(default=True, nullable=False)
     default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_measure: Mapped[bool] = mapped_column(default=False, nullable=False)
+    is_surrogate_key: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     __table_args__ = (UniqueConstraint("entity_id", "name", name="uq_attribute_entity_name"),)
 
@@ -321,9 +341,11 @@ __all__ = [
     "DataModel",
     "Domain",
     "Entity",
+    "EntityRole",
     "ExportRecord",
     "Relationship",
     "ReviewTask",
+    "SCDType",
     "Settings",
 ]
 
