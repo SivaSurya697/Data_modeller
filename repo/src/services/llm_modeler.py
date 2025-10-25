@@ -7,6 +7,7 @@ from typing import Any
 
 from types import SimpleNamespace
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.models.tables import Attribute, Entity, Relationship
@@ -43,7 +44,7 @@ class ModelingService:
         client = LLMClient(user_settings)
         payload = client.generate_model_payload(prompt)
 
-        name = str(payload.get("name") or f"{context.domain.name} Model")
+        name = str(payload.get("name") or f"{domain.name} Model")
         summary = str(payload.get("summary") or "Model summary pending review.")
         definition = str(payload.get("definition") or "")
         if not definition:

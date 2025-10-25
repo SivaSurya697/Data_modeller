@@ -1,7 +1,8 @@
-"""Helpers to build context for LLM prompts."""
+"""Build compact JSON context for a domain."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -116,9 +117,8 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
         changes=changes,
     )
 
+    return attribute_dict
 
-def build_prompt(context: DomainContext, instructions: str | None = None) -> str:
-    """Compose the prompt sent to the language model."""
 
     sections: list[str] = context.to_prompt_sections()
     if instructions:
