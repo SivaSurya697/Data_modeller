@@ -6,11 +6,12 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-class SettingInput(BaseModel):
-    """Validate persisted setting entries."""
+class UserSettingsInput(BaseModel):
+    """Validate persisted user configuration."""
 
-    key: str = Field(min_length=1, max_length=255)
-    value: str = Field(min_length=1)
+    openai_api_key: str = Field(min_length=1)
+    openai_base_url: str = Field(min_length=1, max_length=255)
+    rate_limit_per_minute: int = Field(gt=0)
 
 
 class DomainInput(BaseModel):
@@ -30,14 +31,15 @@ class DraftRequest(BaseModel):
 class ChangeSetInput(BaseModel):
     """Validate changeset form submissions."""
 
-    model_id: int
-    description: str = Field(min_length=1)
+    domain_id: int
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(min_length=1)
 
 
 class ExportRequest(BaseModel):
     """Validate export request input."""
 
-    model_id: int
+    domain_id: int
     exporter: str
 
     @field_validator("exporter")
