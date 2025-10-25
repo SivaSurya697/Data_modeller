@@ -72,6 +72,7 @@ def _build_draft_view_model(result: DraftResult) -> dict[str, object]:
     relationships = [_serialize_relationship(rel) for rel in result.relationships]
 
     return {
+        "model": result.model,
         "version": result.version,
         "facts": facts,
         "dimensions": dimensions,
@@ -97,12 +98,7 @@ def draft_review():
         try:
             with get_db() as session:
                 result = service.generate_draft(session, payload)
-                draft = {
-                    "model": result.model,
-                    "version": result.version,
-                    "entities": result.entities,
-                    "impact": result.impact,
-                }
+                draft = _build_draft_view_model(result)
             flash("Draft generated successfully.", "success")
         except Exception as exc:  # pragma: no cover - surface to UI
             flash(f"Draft generation failed: {exc}", "error")
