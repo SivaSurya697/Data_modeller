@@ -34,7 +34,11 @@ class Domain(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="published", server_default="published"
+    )
+    version: Mapped[str] = mapped_column(String(50), nullable=False, default="0.0.0", server_default="0.0.0")
 
     models: Mapped[list["DataModel"]] = relationship(
         "DataModel", back_populates="domain", cascade="all, delete-orphan"
