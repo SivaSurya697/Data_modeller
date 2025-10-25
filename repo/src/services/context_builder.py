@@ -37,7 +37,15 @@ class DomainContext:
         if self.entities:
             entity_blocks: list[str] = []
             for entity in self.entities:
-                lines = [f"Entity: {entity.name}"]
+                role_display = getattr(entity, "entity_role", None)
+                role_text = (
+                    role_display.value
+                    if getattr(role_display, "value", None)
+                    else str(role_display)
+                    if role_display is not None
+                    else "unknown"
+                )
+                lines = [f"Entity: {entity.name} (role: {role_text})"]
                 if entity.description:
                     lines.append(f"Description: {entity.description.strip()}")
                 if entity.documentation:
@@ -55,11 +63,17 @@ class DomainContext:
             sections.append("Existing Entities:\n" + "\n\n".join(entity_blocks))
 
         if self.relationships:
-            rel_lines = [
-                f"- {rel.from_entity.name} {rel.relationship_type} {rel.to_entity.name}"
-                + (f" – {rel.description.strip()}" if rel.description else "")
-                for rel in self.relationships
-            ]
+            rel_lines = []
+            for rel in self.relationships:
+                from_card = getattr(rel.cardinality_from, "value", rel.cardinality_from)
+                to_card = getattr(rel.cardinality_to, "value", rel.cardinality_to)
+                line = (
+                    f"- {rel.from_entity.name} ({from_card}) {rel.relationship_type} "
+                    f"{rel.to_entity.name} ({to_card})"
+                )
+                if rel.description:
+                    line += f" – {rel.description.strip()}"
+                rel_lines.append(line)
             sections.append("Existing Relationships:\n" + "\n".join(rel_lines))
 
         if self.change_sets:
@@ -125,12 +139,15 @@ def build_prompt(context: DomainContext, instructions: str | None) -> str:
             sections.append(f"Additional Instructions:\n{instructions_clean}")
     sections.append(
         "Respond with JSON describing the proposed entities. The top-level "
-        "object must include an 'entities' array where each entry has "
-        "'name', optional 'description', optional 'documentation', and an "
+        "object must include an 'entities' array where each entry has 'name', "
+        "'role', optional 'description', optional 'documentation', and an "
         "'attributes' array containing 'name', optional 'data_type', optional "
-        "'description', and 'is_nullable'. Optionally include a 'relationships' "
-        "array (with 'from', 'to', and 'type') and a 'changes' array with impact "
-        "notes for reviewers."
+        "'description', 'is_nullable', and optional 'default'. Entity 'role' must "
+        "be one of: 'fact', 'dimension', 'bridge', or 'unknown'. Optionally "
+        "include a 'relationships' array (with 'from', 'to', 'type', "
+        "'cardinality_from', and 'cardinality_to') and a 'changes' array with "
+        "impact notes for reviewers. Relationship cardinalities must each be "
+        "one of: 'one', 'many', 'zero_or_one', 'zero_or_many', or 'unknown'."
     )
     return "\n\n".join(sections)
 

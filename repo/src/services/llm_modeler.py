@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from enum import Enum
+from typing import Any, Mapping, TypeVar
 
 from sqlalchemy.orm import Session
 
-from src.models.tables import Attribute, DataModel, Entity, Relationship
+from src.models.tables import (
+    Attribute,
+    DataModel,
+    Entity,
+    EntityRole,
+    Relationship,
+    RelationshipCardinality,
+)
 from src.services.context_builder import DomainContext, build_prompt, load_context
 from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
@@ -22,6 +30,9 @@ class DraftResult:
     model: DataModel
     entities: list[Entity]
     impact: list[ImpactItem]
+
+
+EnumT = TypeVar("EnumT", bound=Enum)
 
 
 class ModelingService:
@@ -110,11 +121,19 @@ class ModelingService:
                 if not isinstance(item, dict):
                     continue
                 entity_name = str(item.get("name") or f"{domain.name} Entity {index}").strip()
+                role_value = item.get("role") or item.get("entity_role")
+                entity_role = self._coerce_enum(
+                    role_value,
+                    enum_cls=EntityRole,
+                    field_name="role",
+                    context=f"Entity '{entity_name}'",
+                )
                 entity = Entity(
                     domain=domain,
                     name=entity_name,
                     description=(str(item.get("description")) or "").strip() or None,
                     documentation=(str(item.get("documentation")) or "").strip() or None,
+                    entity_role=entity_role,
                 )
                 attributes_raw = item.get("attributes")
                 if isinstance(attributes_raw, list):
@@ -153,6 +172,7 @@ class ModelingService:
                     name=f"{domain.name} Entity",
                     description=payload.get("summary"),
                     documentation=payload.get("definition"),
+                    entity_role=EntityRole.UNKNOWN,
                 )
             )
         return entities
@@ -188,6 +208,22 @@ class ModelingService:
                     or item.get("relationship_type")
                     or "relates to"
                 ).strip()
+                cardinality_from = self._coerce_enum(
+                    item.get("cardinality_from")
+                    or item.get("from_cardinality")
+                    or item.get("source_cardinality"),
+                    enum_cls=RelationshipCardinality,
+                    field_name="cardinality_from",
+                    context=f"Relationship {from_name} -> {to_name}",
+                )
+                cardinality_to = self._coerce_enum(
+                    item.get("cardinality_to")
+                    or item.get("to_cardinality")
+                    or item.get("target_cardinality"),
+                    enum_cls=RelationshipCardinality,
+                    field_name="cardinality_to",
+                    context=f"Relationship {from_name} -> {to_name}",
+                )
                 relationships.append(
                     Relationship(
                         domain=domain,
@@ -195,9 +231,32 @@ class ModelingService:
                         to_entity=name_to_entity[to_name],
                         relationship_type=relationship_type,
                         description=(str(item.get("description")) or "").strip() or None,
+                        cardinality_from=cardinality_from,
+                        cardinality_to=cardinality_to,
                     )
                 )
         return relationships
+
+    @staticmethod
+    def _coerce_enum(
+        value: Any,
+        *,
+        enum_cls: type[EnumT],
+        field_name: str,
+        context: str,
+    ) -> EnumT:
+        if isinstance(value, enum_cls):
+            return value
+        if value is None:
+            raise ValueError(f"{context} must include '{field_name}'")
+        text = str(value).strip().lower()
+        for member in enum_cls:  # type: ignore[call-arg]
+            if getattr(member, "value", None) == text:
+                return member
+        valid_values = ", ".join(member.value for member in enum_cls)  # type: ignore[attr-defined]
+        raise ValueError(
+            f"{context} has invalid {field_name} '{value}'. Expected one of: {valid_values}"
+        )
 
 
 __all__ = ["DraftResult", "ModelingService"]

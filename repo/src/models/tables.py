@@ -10,8 +10,9 @@ that the blueprints and services can rely on a predictable API.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db import Base
@@ -83,6 +84,15 @@ class DataModel(Base, TimestampMixin):
     domain: Mapped[Domain] = relationship("Domain", back_populates="models")
 
 
+class EntityRole(str, Enum):
+    """Supported roles for entities within a dimensional model."""
+
+    FACT = "fact"
+    DIMENSION = "dimension"
+    BRIDGE = "bridge"
+    UNKNOWN = "unknown"
+
+
 class Entity(Base, TimestampMixin):
     """Entity representing a conceptual object within a domain."""
 
@@ -95,6 +105,12 @@ class Entity(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     documentation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_role: Mapped[EntityRole] = mapped_column(
+        SAEnum(EntityRole, name="entity_role_enum", validate_strings=True),
+        nullable=False,
+        default=EntityRole.UNKNOWN,
+        server_default=EntityRole.UNKNOWN.value,
+    )
 
     __table_args__ = (UniqueConstraint("domain_id", "name", name="uq_entity_domain_name"),)
 
@@ -135,6 +151,16 @@ class Attribute(Base, TimestampMixin):
     entity: Mapped[Entity] = relationship("Entity", back_populates="attributes")
 
 
+class RelationshipCardinality(str, Enum):
+    """Supported relationship cardinalities."""
+
+    ONE = "one"
+    MANY = "many"
+    ZERO_OR_ONE = "zero_or_one"
+    ZERO_OR_MANY = "zero_or_many"
+    UNKNOWN = "unknown"
+
+
 class Relationship(Base, TimestampMixin):
     """Relationship between two entities in the same domain."""
 
@@ -152,6 +178,26 @@ class Relationship(Base, TimestampMixin):
     )
     relationship_type: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cardinality_from: Mapped[RelationshipCardinality] = mapped_column(
+        SAEnum(
+            RelationshipCardinality,
+            name="relationship_cardinality_enum",
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=RelationshipCardinality.UNKNOWN,
+        server_default=RelationshipCardinality.UNKNOWN.value,
+    )
+    cardinality_to: Mapped[RelationshipCardinality] = mapped_column(
+        SAEnum(
+            RelationshipCardinality,
+            name="relationship_cardinality_enum",
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=RelationshipCardinality.UNKNOWN,
+        server_default=RelationshipCardinality.UNKNOWN.value,
+    )
 
     __table_args__ = (
         UniqueConstraint(
