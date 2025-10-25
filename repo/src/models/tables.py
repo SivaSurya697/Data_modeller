@@ -11,8 +11,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db import Base
@@ -217,6 +228,10 @@ class Relationship(Base, TimestampMixin):
         default=RelationshipCardinality.UNKNOWN,
         server_default=RelationshipCardinality.UNKNOWN.value,
     )
+    inference_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="manual", server_default="manual"
+    )
+    evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
