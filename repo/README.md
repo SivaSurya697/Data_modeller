@@ -65,9 +65,9 @@ Navigate to `http://127.0.0.1:5000/` to access the UI.
 
 1. **Configure operational settings** – Store any shared parameters or constraints in the Settings screen. They are injected into prompts for consistent guidance.
 2. **Create domains** – Define domains and their descriptions from the Domains screen. Domains group related drafts and exports.
-3. **Generate a draft** – From the Draft Review page, select a domain, optionally provide instructions, and submit. The application builds a contextual prompt and stores the generated model.
-4. **Review impact** – Inspect the impact analysis rendered alongside the draft to understand how it differs from previous models.
-5. **Capture change sets** – Document manual adjustments as change sets for traceability.
+3. **Generate a draft** – From the Draft Review page, select a domain, optionally provide instructions, and submit. The application builds a contextual prompt and stores the generated entities and relationships.
+4. **Review impact** – Inspect the impact analysis rendered alongside the draft to understand how it differs from previous entity snapshots.
+5. **Capture change sets** – Document manual adjustments as change sets for traceability at the domain level.
 6. **Export artifacts** – Produce PlantUML diagrams or markdown data dictionaries from the Exports screen. Generated files appear under `outputs/`.
 
 ## Project layout
@@ -87,7 +87,7 @@ outputs/               # Generated export files
 - Run `python -m compileall .` to perform a lightweight syntax check across modules.
 - The OpenAI client is instantiated with `OpenAI(api_key=..., base_url=...)` to comply with enterprise gateway requirements.
 - Add new exporters in `src/services/exporters/` and register them in the exports blueprint.
-- The SQLAlchemy session helper in `src/models/db.py` provides a `session_scope()` context manager for transactional operations.
+- The SQLAlchemy session helper in `src/models/db.py` provides a `get_db()` context manager for transactional operations.
 
 ## Further reading
 

@@ -19,21 +19,50 @@
 
 {% if draft %}
 <section>
-    <h3>Draft Summary</h3>
-    <p>{{ draft.summary }}</p>
-</section>
-<section>
-    <h3>Draft Definition</h3>
-    <pre>{{ draft.definition }}</pre>
+    <h3>Draft Entities</h3>
+    {% if draft.entities %}
+        {% for entity in draft.entities %}
+            <article class="card">
+                <h4>{{ entity.name }}</h4>
+                {% if entity.description %}<p>{{ entity.description }}</p>{% endif %}
+                {% if entity.documentation %}<pre>{{ entity.documentation }}</pre>{% endif %}
+                {% if entity.attributes %}
+                    <h5>Attributes</h5>
+                    <ul>
+                        {% for attribute in entity.attributes %}
+                            <li>{{ attribute.name }}{% if attribute.data_type %} ({{ attribute.data_type }}){% endif %}{% if not attribute.is_nullable %} – required{% endif %}{% if attribute.description %}: {{ attribute.description }}{% endif %}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </article>
+        {% endfor %}
+    {% else %}
+        <p>No entities were produced.</p>
+    {% endif %}
 </section>
 <section>
     <h3>Impact Assessment</h3>
     {% if draft.impact %}
-        <ul>
-        {% for item in draft.impact %}
-            <li>{{ item }}</li>
-        {% endfor %}
-        </ul>
+        <table class="impact-table">
+            <thead>
+                <tr>
+                    <th scope="col">Dimension</th>
+                    <th scope="col">Consumer</th>
+                    <th scope="col">Impact</th>
+                    <th scope="col">Explanation</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in draft.impact %}
+                <tr>
+                    <td>{{ item.dimension }}</td>
+                    <td>{{ item.consumer }}</td>
+                    <td class="impact-level impact-{{ item.impact_level }}">{{ item.impact_level|capitalize }}</td>
+                    <td>{{ item.explanation }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
     {% else %}
         <p>No impact detected.</p>
     {% endif %}
