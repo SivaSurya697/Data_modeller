@@ -1,30 +1,93 @@
-"""Create PlantUML diagrams from model definitions."""
+"""Emit PlantUML diagrams from JSON model definitions."""
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
-
-from slugify import slugify
-
-from src.models.tables import DataModel
+from typing import Any, Mapping
 
 
-def export_plantuml(model: DataModel, output_dir: Path) -> Path:
-    """Generate a PlantUML class diagram stub."""
+from src.models.tables import Domain, Entity
+
+
+def _class_name(entity: Entity) -> str:
+    """Derive a PlantUML friendly class identifier."""
+
+    token = slugify(entity.name, separator="_")
+    return token or f"entity_{entity.id}"
+
+
+def export_plantuml(domain: Domain, output_dir: Path) -> Path:
+    """Generate a PlantUML class diagram for a domain."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    file_path = output_dir / f"{slugify(model.name)}.puml"
-    definition_lines = "\n".join(
-        f"' {line}" for line in model.definition.strip().splitlines()
+    file_path = output_dir / f"{slugify(domain.name)}.puml"
+
+    lines: list[str] = [
+        "@startuml",
+        "skinparam classAttributeIconSize 0",
+        f"title {domain.name}",
+    ]
+
+    entities = sorted(domain.entities, key=lambda item: item.name.lower())
+    for entity in entities:
+        class_name = _class_name(entity)
+        lines.append(f"class {class_name} {{")
+        if entity.description:
+            for description_line in entity.description.splitlines():
+                lines.append(f"  ' {description_line}")
+        for attribute in sorted(entity.attributes, key=lambda item: item.name.lower()):
+            data_type = attribute.data_type or "unspecified"
+            nullable = "?" if attribute.is_nullable else "!"
+            lines.append(f"  {attribute.name}: {data_type} {nullable}")
+        lines.append("}")
+
+    relationships = sorted(
+        domain.relationships,
+        key=lambda rel: (rel.from_entity.name.lower(), rel.to_entity.name.lower(), rel.relationship_type),
     )
-    content = "\n".join(
-        [
-            "@startuml",
-            "skinparam classAttributeIconSize 0",
-            f"title {model.name} ({model.domain.name})",
-            "' Model definition excerpt:",
-            definition_lines,
-            "@enduml",
-        ]
-    )
-    file_path.write_text(content, encoding="utf-8")
+    for relationship in relationships:
+        left = _class_name(relationship.from_entity)
+        right = _class_name(relationship.to_entity)
+        label = relationship.relationship_type or "relates to"
+        lines.append(f"{left} --> {right} : {label}")
+        if relationship.description:
+            for description_line in relationship.description.splitlines():
+                lines.append(f"' {description_line}")
+
+    lines.append("@enduml")
+    file_path.write_text("\n".join(lines), encoding="utf-8")
     return file_path
+
+
+def export_plantuml(model: "DataModel", output_dir: Path) -> Path:  # pragma: no cover - legacy shim
+    """Backward compatible wrapper for existing callers expecting ORM models."""
+
+    payload = {
+        "name": model.name,
+        "definition": model.definition,
+        "domain": {"name": model.domain.name if model.domain else None},
+    }
+    return emit_plantuml(payload, output_dir)
+
+
+def _extract_name(model: Mapping[str, Any]) -> str:
+    value = str(model.get("name") or "Model").strip()
+    return value or "Model"
+
+
+def _extract_domain_name(model: Mapping[str, Any]) -> str:
+    domain = model.get("domain")
+    if isinstance(domain, Mapping):
+        raw = domain.get("name")
+    else:
+        raw = model.get("domain_name")
+    return str(raw).strip() if raw else ""
+
+
+def _slug(value: str) -> str:
+    slug = slugify(value)
+    return slug or "model"
+
+
+from src.models.tables import DataModel  # noqa: E402  # isort:skip

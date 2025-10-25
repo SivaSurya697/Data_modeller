@@ -6,8 +6,14 @@ from http import HTTPStatus
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
-from src.services.user_settings import get_user_settings, save_user_settings
-from src.services.validators import UserSettingsPayload
+from src.models.db import session_scope
+from src.services.settings import (
+    DEFAULT_USER_ID,
+    get_user_settings,
+    save_user_settings,
+    UserSettings,
+)
+from src.services.validators import UserSettingsInput
 
 bp = Blueprint("settings", __name__, url_prefix="/api/settings")
 
@@ -16,8 +22,13 @@ bp = Blueprint("settings", __name__, url_prefix="/api/settings")
 def list_settings():
     """Return stored user settings without revealing sensitive values."""
 
-    settings = get_user_settings(include_api_key=False)
-    return jsonify({"settings": settings}), HTTPStatus.OK
+    stored: UserSettings | None = None
+    with session_scope() as session:
+        try:
+            stored = get_user_settings(session, DEFAULT_USER_ID)
+        except RuntimeError:
+            stored = None
+    return render_template("settings.html", settings=stored)
 
 
 @bp.route("/", methods=["POST"])
@@ -26,20 +37,24 @@ def update_settings():
 
     payload = request.get_json(silent=True) or {}
     try:
-        data = UserSettingsPayload(**payload)
+        payload = UserSettingsInput(**request.form)
     except ValidationError as exc:
-        return (
-            jsonify({"error": "Invalid settings payload", "details": exc.errors()}),
-            HTTPStatus.BAD_REQUEST,
-        )
+        flash(f"Invalid input: {exc}", "error")
+        return redirect(url_for("settings.index"))
 
-    save_user_settings(
-        openai_api_key=data.openai_api_key,
-        openai_base_url=data.openai_base_url,
-    )
+    with session_scope() as session:
+        try:
+            save_user_settings(
+                session,
+                DEFAULT_USER_ID,
+                openai_api_key=payload.openai_api_key,
+                openai_base_url=payload.openai_base_url,
+                rate_limit_per_minute=payload.rate_limit_per_minute,
+            )
+        except RuntimeError as exc:
+            flash(f"Could not save settings: {exc}", "error")
+            return redirect(url_for("settings.index"))
 
-    settings = get_user_settings(include_api_key=False)
-    return (
-        jsonify({"message": "Settings updated", "settings": settings}),
-        HTTPStatus.OK,
-    )
+    flash("Settings stored.", "success")
+
+    return redirect(url_for("settings.index"))

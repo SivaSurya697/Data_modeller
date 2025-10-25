@@ -16,7 +16,7 @@
     <tr>
         <th>Name</th>
         <th>Description</th>
-        <th>Models</th>
+        <th>Entities</th>
     </tr>
     </thead>
     <tbody>
@@ -25,14 +25,14 @@
             <td>{{ domain.name }}</td>
             <td>{{ domain.description }}</td>
             <td>
-                {% if domain.models %}
+                {% if domain.entities %}
                     <ul>
-                        {% for model in domain.models %}
-                            <li>{{ model.name }} – {{ model.summary }}</li>
+                        {% for entity in domain.entities %}
+                            <li>{{ entity.name }}{% if entity.description %} – {{ entity.description }}{% endif %}</li>
                         {% endfor %}
                     </ul>
                 {% else %}
-                    No models yet.
+                    No entities yet.
                 {% endif %}
             </td>
         </tr>

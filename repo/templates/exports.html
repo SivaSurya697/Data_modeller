@@ -3,11 +3,11 @@
 {% block content %}
 <h2>Exports</h2>
 <form method="post">
-    <label for="model_id">Model</label>
-    <select id="model_id" name="model_id" required>
-        <option value="" disabled selected>Select a model</option>
-        {% for model in models %}
-            <option value="{{ model.id }}">{{ model.name }} ({{ model.domain.name }})</option>
+    <label for="domain_id">Domain</label>
+    <select id="domain_id" name="domain_id" required>
+        <option value="" disabled selected>Select a domain</option>
+        {% for domain in domains %}
+            <option value="{{ domain.id }}">{{ domain.name }}</option>
         {% endfor %}
     </select>
 
@@ -24,7 +24,7 @@
 <table class="table">
     <thead>
     <tr>
-        <th>Model</th>
+        <th>Domain</th>
         <th>Exporter</th>
         <th>Created</th>
         <th>File</th>
@@ -33,7 +33,7 @@
     <tbody>
     {% for item in exports %}
         <tr>
-            <td>{{ item.model.name }}</td>
+            <td>{{ item.domain.name }}</td>
             <td>{{ item.exporter|title }}</td>
             <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
             <td><a href="{{ url_for('exports.download', export_id=item.id) }}">Download</a></td>
