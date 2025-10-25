@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, TypeVar
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.tables import (
@@ -28,6 +29,7 @@ class DraftResult:
     """Result returned by :class:`ModelingService`."""
 
     model: DataModel
+    version: int
     entities: list[Entity]
     impact: list[ImpactItem]
 
@@ -61,7 +63,12 @@ class ModelingService:
 
         impact = evaluate_model_impact(previous_entities, model.domain.entities, hints_iter)
 
-        return DraftResult(model=model, entities=model.domain.entities, impact=impact)
+        return DraftResult(
+            model=model,
+            version=model.version,
+            entities=model.domain.entities,
+            impact=impact,
+        )
 
     def _persist_model(
         self,
@@ -101,8 +108,14 @@ class ModelingService:
         for relationship in relationships:
             session.add(relationship)
 
+        max_version = session.execute(
+            select(func.max(DataModel.version)).where(DataModel.domain_id == domain.id)
+        ).scalar()
+        next_version = int(max_version or 0) + 1
+
         model = DataModel(
             domain=domain,
+            version=next_version,
             name=name or f"{domain.name} Model",
             summary=summary or "Model summary pending review.",
             definition=definition,
