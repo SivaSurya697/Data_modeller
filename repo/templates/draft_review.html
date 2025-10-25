@@ -29,11 +29,26 @@
 <section>
     <h3>Impact Assessment</h3>
     {% if draft.impact %}
-        <ul>
-        {% for item in draft.impact %}
-            <li>{{ item }}</li>
-        {% endfor %}
-        </ul>
+        <table class="impact-table">
+            <thead>
+                <tr>
+                    <th scope="col">Dimension</th>
+                    <th scope="col">Consumer</th>
+                    <th scope="col">Impact</th>
+                    <th scope="col">Explanation</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in draft.impact %}
+                <tr>
+                    <td>{{ item.dimension }}</td>
+                    <td>{{ item.consumer }}</td>
+                    <td class="impact-level impact-{{ item.impact_level }}">{{ item.impact_level|capitalize }}</td>
+                    <td>{{ item.explanation }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
     {% else %}
         <p>No impact detected.</p>
     {% endif %}

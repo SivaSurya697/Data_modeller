@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from src.models.tables import DataModel
 from src.services.context_builder import build_prompt, load_context
-from src.services.impact import evaluate_model_impact
+from src.services.impact import compute_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import AppSettings
 from src.services.validators import DraftRequest
@@ -18,7 +18,7 @@ class DraftResult:
     """Structured response returned to the API layer."""
 
     model: DataModel
-    impact: list[str]
+    impact: list[dict[str, str]]
 
 
 class ModelingService:
@@ -59,6 +59,48 @@ class ModelingService:
         else:
             change_hints = None
 
-        impact = evaluate_model_impact(context.models, model.definition, change_hints)
+        shared_dim_changes_raw = payload.get("shared_dim_changes")
+        if isinstance(shared_dim_changes_raw, list):
+            shared_dim_changes = [
+                item for item in shared_dim_changes_raw if isinstance(item, dict)
+            ]
+        elif isinstance(shared_dim_changes_raw, dict):
+            shared_dim_changes = []
+            for dimension, change_value in shared_dim_changes_raw.items():
+                if isinstance(change_value, dict):
+                    entry = {"dimension": dimension}
+                    entry.update(change_value)
+                    shared_dim_changes.append(entry)
+                else:
+                    shared_dim_changes.append(
+                        {
+                            "dimension": dimension,
+                            "change": str(change_value),
+                        }
+                    )
+        else:
+            shared_dim_changes = []
+
+        consumers_index_raw = payload.get("consumers_index")
+        if isinstance(consumers_index_raw, dict):
+            consumers_index = consumers_index_raw
+        else:
+            consumers_index = {}
+
+        impact = compute_impact(shared_dim_changes, consumers_index)
+
+        if not impact and change_hints:
+            for hint in change_hints:
+                explanation = hint.strip()
+                if not explanation:
+                    continue
+                impact.append(
+                    {
+                        "dimension": "General",
+                        "consumer": "All consumers",
+                        "impact_level": "medium",
+                        "explanation": explanation,
+                    }
+                )
 
         return DraftResult(model=model, impact=impact)
