@@ -1,14 +1,16 @@
 """High level modelling workflow using OpenAI."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from src.models.tables import DataModel
 from src.services.context_builder import build_prompt, load_context
 from src.services.impact import evaluate_model_impact
-from src.services.llm_client import LLMClient
+from src.services.llm_client import DEFAULT_MODEL_NAME, chat_complete
 from src.services.settings import AppSettings
 from src.services.validators import DraftRequest
 
@@ -27,13 +29,35 @@ class ModelingService:
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
 
+    SYSTEM_USER_ID = 0
+
     def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
         """Create and persist a model draft for the provided domain."""
 
         context = load_context(session, request.domain_id)
         prompt = build_prompt(context, request.instructions)
-        client = LLMClient(self._settings)
-        payload = client.generate_model_payload(prompt)
+        response_text = chat_complete(
+            session,
+            user_id=self.SYSTEM_USER_ID,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a senior data modeller. Provide concise JSON outputs "
+                        "containing name, summary, definition (markdown allowed), and "
+                        "an optional changes array describing deltas."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            model=DEFAULT_MODEL_NAME,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        try:
+            payload: dict[str, Any] = json.loads(response_text)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise ValueError("Model response was not valid JSON") from exc
 
         name = str(payload.get("name") or f"{context.domain.name} Model")
         summary = str(payload.get("summary") or "Model summary pending review.")
