@@ -1,43 +1,35 @@
 {% extends 'base.html' %}
 {% block title %}Settings · Data Modeller{% endblock %}
 {% block content %}
-<h2>Application Settings</h2>
+<h2>User Settings</h2>
+<p>Store your OpenAI credentials securely. API keys are encrypted before they are
+saved to the database.</p>
+
 <section>
-    <p><strong>Environment:</strong> {{ config.environment }}</p>
-    <p><strong>Database:</strong> {{ config.database_url }}</p>
-    <p><strong>OpenAI Base URL:</strong> {{ config.openai_base_url }}</p>
-    <p><strong>Requests per minute:</strong> {{ config.rate_limit_per_minute }}</p>
+    {% if settings %}
+        <p><strong>User:</strong> {{ settings.user_id }}</p>
+        <p><strong>OpenAI Base URL:</strong> {{ settings.openai_base_url }}</p>
+        <p><strong>Requests per minute:</strong> {{ settings.rate_limit_per_minute }}</p>
+        <p><strong>API key status:</strong> stored</p>
+    {% else %}
+        <p>No user settings are currently stored.</p>
+    {% endif %}
 </section>
 
-<h3>Persisted Settings</h3>
+<h3>Update settings</h3>
 <form method="post">
-    <label for="key">Key</label>
-    <input id="key" name="key" type="text" required>
-    <label for="value">Value</label>
-    <textarea id="value" name="value" rows="3" required></textarea>
-    <button type="submit">Save Setting</button>
-</form>
+    <label for="openai_api_key">OpenAI API key</label>
+    <input id="openai_api_key" name="openai_api_key" type="password" required>
 
-{% if settings %}
-<table class="table">
-    <thead>
-    <tr>
-        <th>Key</th>
-        <th>Value</th>
-        <th>Updated</th>
-    </tr>
-    </thead>
-    <tbody>
-    {% for item in settings %}
-        <tr>
-            <td><code>{{ item.key }}</code></td>
-            <td>{{ item.value }}</td>
-            <td>{{ item.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No settings stored yet.</p>
-{% endif %}
+    <label for="openai_base_url">OpenAI base URL</label>
+    <input id="openai_base_url" name="openai_base_url" type="url"
+           value="{{ settings.openai_base_url if settings else 'https://api.openai.com/v1' }}"
+           required>
+
+    <label for="rate_limit_per_minute">Requests per minute</label>
+    <input id="rate_limit_per_minute" name="rate_limit_per_minute" type="number" min="1"
+           value="{{ settings.rate_limit_per_minute if settings else 60 }}" required>
+
+    <button type="submit">Save settings</button>
+</form>
 {% endblock %}
