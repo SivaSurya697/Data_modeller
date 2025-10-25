@@ -16,7 +16,7 @@ from openai import (
 )
 from sqlalchemy.orm import Session
 
-from src.services.settings import load_openai_credentials
+from src.services.settings import UserSettings
 
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
 _LOGGER = logging.getLogger(__name__)
@@ -31,18 +31,15 @@ _RECOVERABLE_ERRORS: tuple[type[OpenAIError], ...] = (
 def get_openai_client(db: Session, user_id: int) -> OpenAI:
     """Instantiate an OpenAI client for the provided database session."""
 
-    api_key, base_url = load_openai_credentials(db, user_id)
-    return OpenAI(api_key=api_key, base_url=base_url)
-
-
-def _normalise_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Normalise chat messages into a list of plain dictionaries."""
-
-    return [dict(message) for message in messages]
-
-
-def _coerce_content(content: Any) -> str:
-    """Coerce message content into a string."""
+    def __init__(self, settings: UserSettings, model_name: str = DEFAULT_MODEL_NAME) -> None:
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is not configured for this user")
+        self._settings = settings
+        self._model_name = model_name
+        self._client = OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+        )
 
     if isinstance(content, str):
         return content

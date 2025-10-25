@@ -5,17 +5,16 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from src.models.db import session_scope
+from src.models.db import get_db
 from src.models.tables import Domain
 from src.services.llm_modeler import ModelingService
-from src.services.settings import load_settings
 from src.services.validators import DraftRequest
 
 bp = Blueprint("modeler", __name__, url_prefix="/modeler")
 
 
 def _load_domains() -> list[Domain]:
-    with session_scope() as session:
+    with get_db() as session:
         domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
     return domains
 
@@ -38,11 +37,10 @@ def generate_draft() -> str:
         flash(f"Invalid input: {exc}", "error")
         return redirect(url_for("modeler.draft_review"))
 
-    settings = load_settings()
-    service = ModelingService(settings)
+    service = ModelingService()
 
     try:
-        with session_scope() as session:
+        with get_db() as session:
             result = service.generate_draft(session, payload)
             draft = {
                 "summary": result.model.summary,

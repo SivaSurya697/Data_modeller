@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from src.models.tables import DataModel
 from src.services.context_builder import build_prompt, load_context
 from src.services.impact import evaluate_model_impact
-from src.services.llm_client import DEFAULT_MODEL_NAME, chat_complete
-from src.services.settings import AppSettings
+from src.services.llm_client import LLMClient
+from src.services.settings import DEFAULT_USER_ID, get_user_settings
 from src.services.validators import DraftRequest
 
 
@@ -26,38 +26,20 @@ class DraftResult:
 class ModelingService:
     """Coordinates prompt building, LLM invocation and persistence."""
 
-    def __init__(self, settings: AppSettings) -> None:
-        self._settings = settings
-
-    SYSTEM_USER_ID = 0
-
-    def generate_draft(self, session: Session, request: DraftRequest) -> DraftResult:
+    def generate_draft(
+        self,
+        session: Session,
+        request: DraftRequest,
+        *,
+        user_id: str = DEFAULT_USER_ID,
+    ) -> DraftResult:
         """Create and persist a model draft for the provided domain."""
 
         context = load_context(session, request.domain_id)
         prompt = build_prompt(context, request.instructions)
-        response_text = chat_complete(
-            session,
-            user_id=self.SYSTEM_USER_ID,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior data modeller. Provide concise JSON outputs "
-                        "containing name, summary, definition (markdown allowed), and "
-                        "an optional changes array describing deltas."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            model=DEFAULT_MODEL_NAME,
-            temperature=0.1,
-            response_format={"type": "json_object"},
-        )
-        try:
-            payload: dict[str, Any] = json.loads(response_text)
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-            raise ValueError("Model response was not valid JSON") from exc
+        user_settings = get_user_settings(session, user_id)
+        client = LLMClient(user_settings)
+        payload = client.generate_model_payload(prompt)
 
         name = str(payload.get("name") or f"{context.domain.name} Model")
         summary = str(payload.get("summary") or "Model summary pending review.")
