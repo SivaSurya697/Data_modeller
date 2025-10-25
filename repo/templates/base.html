@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Data Modeller{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<header>
+    <h1>Data Modeller</h1>
+    <nav>
+        <a href="{{ url_for('settings.index') }}">Settings</a>
+        <a href="{{ url_for('domains.index') }}">Domains</a>
+        <a href="{{ url_for('modeler.draft_review') }}">Draft Review</a>
+        <a href="{{ url_for('changesets.index') }}">Changesets</a>
+        <a href="{{ url_for('exports.index') }}">Exports</a>
+    </nav>
+</header>
+<main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

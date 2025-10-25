@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Changesets · Data Modeller{% endblock %}
+{% block content %}
+<h2>Changesets</h2>
+<form method="post">
+    <label for="model_id">Model</label>
+    <select id="model_id" name="model_id" required>
+        <option value="" disabled selected>Select a model</option>
+        {% for model in models %}
+            <option value="{{ model.id }}">{{ model.name }} ({{ model.domain.name }})</option>
+        {% endfor %}
+    </select>
+
+    <label for="description">Change summary</label>
+    <textarea id="description" name="description" rows="4" required></textarea>
+    <button type="submit">Record Change</button>
+</form>
+
+{% if changesets %}
+<table class="table">
+    <thead>
+    <tr>
+        <th>Model</th>
+        <th>Description</th>
+        <th>Created</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for item in changesets %}
+        <tr>
+            <td>{{ item.model.name }}</td>
+            <td>{{ item.description }}</td>
+            <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No changesets captured.</p>
+{% endif %}
+{% endblock %}

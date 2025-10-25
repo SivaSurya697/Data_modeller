@@ -1,0 +1,12 @@
+Flask>=3.0
+Flask-Login>=0.6
+Flask-Limiter>=3.8
+SQLAlchemy>=2.0
+alembic>=1.13
+pydantic>=2.7
+python-dotenv>=1.0
+cryptography>=42.0
+openai>=1.40
+pandas>=2.2
+rapidfuzz>=3.8
+python-slugify>=8.0
