@@ -33,20 +33,27 @@ def index():
     """List existing domains and handle creation requests."""
 
     if request.method == "POST":
+        submission = request.get_json(silent=True) or request.form.to_dict()
         try:
-            payload = DomainInput(**request.form)
+            payload = DomainInput(**submission)
         except ValidationError as exc:
-            flash(f"Invalid input: {exc}", "error")
+            messages = ", ".join(
+                f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in exc.errors()
+            )
+            flash(f"Invalid input: {messages}", "error")
             return redirect(url_for("domains.index"))
+
+        name = payload.name.strip()
+        description = payload.description.strip()
 
         with get_db() as session:
             existing = session.execute(
-                select(Domain).where(Domain.name.ilike(payload.name))
+                select(Domain).where(Domain.name.ilike(name))
             ).scalar_one_or_none()
             if existing:
                 flash("Domain already exists.", "error")
             else:
-                session.add(Domain(name=payload.name.strip(), description=payload.description.strip()))
+                session.add(Domain(name=name, description=description))
                 flash("Domain created.", "success")
         return redirect(url_for("domains.index"))
 
