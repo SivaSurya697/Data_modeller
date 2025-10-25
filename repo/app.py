@@ -49,7 +49,7 @@ def create_app() -> Flask:
 
     @app.route("/")
     def home() -> str:
-        return redirect(url_for("settings.index"))
+        return redirect(url_for("domains.index"))
 
     @app.cli.command("init-db")
     def init_db_command() -> None:

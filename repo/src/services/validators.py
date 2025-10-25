@@ -3,14 +3,30 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class SettingInput(BaseModel):
-    """Validate persisted setting entries."""
+class UserSettingsPayload(BaseModel):
+    """Validate API payloads for user settings updates."""
 
-    key: str = Field(min_length=1, max_length=255)
-    value: str = Field(min_length=1)
+    openai_api_key: str | None = Field(default=None)
+    openai_base_url: str | None = Field(default=None)
+
+    @field_validator("openai_api_key", "openai_base_url", mode="before")
+    @classmethod
+    def _normalise(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Value cannot be empty")
+        return value
+
+    @model_validator(mode="after")
+    def _ensure_payload_not_empty(self) -> "UserSettingsPayload":
+        if self.openai_api_key is None and self.openai_base_url is None:
+            raise ValueError("At least one setting must be provided")
+        return self
 
 
 class DomainInput(BaseModel):
