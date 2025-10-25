@@ -63,9 +63,16 @@ class ModelingService:
 
         name = str(payload.get("name") or f"{domain.name} Model").strip()
         summary = str(payload.get("summary") or "Model summary pending review.").strip()
-        definition = str(payload.get("definition") or "").strip()
-        if not definition:
-            raise ValueError("Model definition missing from LLM response")
+
+        definition_source = payload.get("definition")
+        if definition_source is None or not str(definition_source).strip():
+            definition_source = (
+                payload.get("summary")
+                or getattr(context.domain, "description", None)
+                or "Model definition pending review."
+            )
+
+        definition = str(definition_source or "").strip() or "Model definition pending review."
 
         # Replace existing entities and relationships for the domain.
         for relationship in list(domain.relationships):
