@@ -13,6 +13,7 @@ from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
 from src.services.validators import DraftRequest
+from src.services.model_analysis import infer_model_version
 
 
 @dataclass(slots=True)
@@ -20,7 +21,9 @@ class DraftResult:
     """Result returned by :class:`ModelingService`."""
 
     model: DataModel
+    version: int
     entities: list[Entity]
+    relationships: list[Relationship]
     impact: list[ImpactItem]
 
 
@@ -49,8 +52,23 @@ class ModelingService:
             hints_iter = None
 
         impact = evaluate_model_impact(previous_entities, model.domain.entities, hints_iter)
+        version = infer_model_version(model.domain)
+        relationships = sorted(
+            model.domain.relationships,
+            key=lambda rel: (
+                rel.from_entity.name.lower(),
+                rel.to_entity.name.lower(),
+                (rel.relationship_type or ""),
+            ),
+        )
 
-        return DraftResult(model=model, entities=model.domain.entities, impact=impact)
+        return DraftResult(
+            model=model,
+            version=version,
+            entities=model.domain.entities,
+            relationships=relationships,
+            impact=impact,
+        )
 
     def _persist_model(
         self,
