@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Mapping, Sequence
 
@@ -50,13 +51,33 @@ class LLMClient:
                 {"role": "user", "content": prompt},
             )
         )
+        sanitized_text = self._sanitize_response(response_text)
         try:
-            payload = json.loads(response_text)
+            payload = json.loads(sanitized_text)
         except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
             raise RuntimeError("LLM response was not valid JSON") from exc
         if not isinstance(payload, Mapping):
             raise RuntimeError("LLM response did not return a JSON object")
         return payload
+
+    @staticmethod
+    def _sanitize_response(response_text: str) -> str:
+        """Return JSON content without code fences or leading labels."""
+
+        text = response_text.strip()
+
+        fence_match = re.fullmatch(
+            r"```\s*(?:json)?\s*(?P<body>.*)```",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        if fence_match:
+            text = fence_match.group("body").strip()
+        else:
+            if text[:4].lower() == "json" and (len(text) == 4 or text[4].isspace()):
+                text = text[4:].lstrip()
+
+        return text
 
     def _chat_complete(self, messages: Sequence[Mapping[str, Any]]) -> str:
         if not messages:

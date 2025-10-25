@@ -42,11 +42,15 @@ def index():
 
         exporter = _EXPORTERS[payload.exporter]
         with get_db() as session:
-            domain = session.execute(
-                select(Domain)
-                .options(joinedload(Domain.entities).joinedload(Entity.attributes))
-                .where(Domain.id == payload.domain_id)
-            ).scalar_one_or_none()
+            domain = (
+                session.execute(
+                    select(Domain)
+                    .options(joinedload(Domain.entities).joinedload(Entity.attributes))
+                    .where(Domain.id == payload.domain_id)
+                )
+                .unique()
+                .scalar_one_or_none()
+            )
             if domain is None:
                 flash("Domain not found.", "error")
                 return redirect(url_for("exports.index"))
