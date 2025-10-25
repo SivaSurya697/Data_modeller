@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from typing import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -129,8 +131,16 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
     )
 
 
-def build_prompt(context: DomainContext, instructions: str | None) -> str:
-    """Generate the final prompt sent to the LLM."""
+_DRAFT_SYSTEM_MESSAGE = "You are a helpful data modelling assistant who produces" \
+    " production-quality dimensional models."
+_CRITIQUE_SYSTEM_MESSAGE = "You are a meticulous senior data modeller reviewing" \
+    " a junior modeller's work."
+
+
+def build_draft_messages(
+    context: DomainContext, instructions: str | None
+) -> list[dict[str, str]]:
+    """Generate system and user messages for the draft generation pass."""
 
     sections = context.to_prompt_sections()
     if instructions:
@@ -138,19 +148,59 @@ def build_prompt(context: DomainContext, instructions: str | None) -> str:
         if instructions_clean:
             sections.append(f"Additional Instructions:\n{instructions_clean}")
     sections.append(
-        "Respond with JSON describing the proposed entities. The top-level "
-        "object must include an 'entities' array where each entry has 'name', "
-        "'role', optional 'description', optional 'documentation', and an "
-        "'attributes' array containing 'name', optional 'data_type', optional "
-        "'description', 'is_nullable', and optional 'default'. Entity 'role' must "
-        "be one of: 'fact', 'dimension', 'bridge', or 'unknown'. Optionally "
-        "include a 'relationships' array (with 'from', 'to', 'type', "
-        "'cardinality_from', and 'cardinality_to') and a 'changes' array with "
-        "impact notes for reviewers. Relationship cardinalities must each be "
-        "one of: 'one', 'many', 'zero_or_one', 'zero_or_many', or 'unknown'."
+        "Task: Propose a refined dimensional model for this domain."
+        " Respond with JSON describing the proposed entities. The top-level"
+        " object must include an 'entities' array where each entry has 'name',"
+        " 'role', optional 'description', optional 'documentation', and an"
+        " 'attributes' array containing 'name', optional 'data_type', optional"
+        " 'description', 'is_nullable', and optional 'default'. Entity 'role'"
+        " must be one of: 'fact', 'dimension', 'bridge', or 'unknown'. Optionally"
+        " include a 'relationships' array (with 'from', 'to', 'type',"
+        " 'cardinality_from', and 'cardinality_to') and a 'changes' array with"
+        " impact notes for reviewers. Relationship cardinalities must each be"
+        " one of: 'one', 'many', 'zero_or_one', 'zero_or_many', or 'unknown'."
     )
-    return "\n\n".join(sections)
+    return [
+        {"role": "system", "content": _DRAFT_SYSTEM_MESSAGE},
+        {"role": "user", "content": "\n\n".join(sections)},
+    ]
 
 
-__all__ = ["DomainContext", "build_prompt", "load_context"]
+def build_critique_messages(
+    context: DomainContext,
+    instructions: str | None,
+    draft_payload: Mapping[str, object],
+) -> list[dict[str, str]]:
+    """Generate messages guiding the critique and amendment pass."""
+
+    sections = context.to_prompt_sections()
+    if instructions:
+        instructions_clean = instructions.strip()
+        if instructions_clean:
+            sections.append(f"Original Additional Instructions:\n{instructions_clean}")
+
+    draft_json = json.dumps(draft_payload, indent=2, sort_keys=True)
+    sections.append("Proposed Draft JSON:\n" + draft_json)
+    sections.append(
+        "Task: Review the proposed data model. Highlight any issues or risky"
+        " assumptions. Respond with JSON containing an optional 'issues' array"
+        " describing concerns, an optional 'amendments' object with updated"
+        " fields, and always an 'amended_model' object containing the complete"
+        " JSON payload after applying your amendments. The amended model must"
+        " follow the same schema as the draft response, including 'entities',"
+        " optional 'relationships', and optional 'changes'."
+    )
+
+    return [
+        {"role": "system", "content": _CRITIQUE_SYSTEM_MESSAGE},
+        {"role": "user", "content": "\n\n".join(sections)},
+    ]
+
+
+__all__ = [
+    "DomainContext",
+    "build_critique_messages",
+    "build_draft_messages",
+    "load_context",
+]
 

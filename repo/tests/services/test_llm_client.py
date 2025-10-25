@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from typing import Iterable
 
 import pytest
 
@@ -10,59 +11,68 @@ if str(ROOT_DIR) not in sys.path:
 from src.services.llm_client import LLMClient
 
 
-def _client_with_response(response: str) -> LLMClient:
+def _client_with_responses(responses: Iterable[str]) -> LLMClient:
+    iterator = iter(responses)
     client = object.__new__(LLMClient)
 
     def _fake_chat_complete(_messages):
-        return response
+        try:
+            return next(iterator)
+        except StopIteration:  # pragma: no cover - defensive guard
+            raise AssertionError("No more stubbed responses available")
 
     client._chat_complete = _fake_chat_complete  # type: ignore[attr-defined]
     return client
 
 
-def test_generate_model_payload_accepts_plain_json():
-    client = _client_with_response('{"foo": 1}')
+def test_generate_draft_payload_accepts_plain_json():
+    client = _client_with_responses(['{"foo": 1}'])
 
-    payload = client.generate_model_payload("Describe the schema")
-
-    assert payload == {"foo": 1}
-
-
-def test_generate_model_payload_accepts_fenced_json():
-    client = _client_with_response("```json\n{\n  \"foo\": 1\n}\n```")
-
-    payload = client.generate_model_payload("Describe the schema")
+    payload = client.generate_draft_payload([{"role": "user", "content": "Describe"}])
 
     assert payload == {"foo": 1}
 
 
-def test_generate_model_payload_accepts_labeled_json():
-    client = _client_with_response("json\n{\n  \"foo\": 1\n}")
+def test_generate_draft_payload_accepts_fenced_json():
+    client = _client_with_responses(["```json\n{\n  \"foo\": 1\n}\n```"])
 
-    payload = client.generate_model_payload("Describe the schema")
+    payload = client.generate_draft_payload([{"role": "user", "content": "Describe"}])
 
     assert payload == {"foo": 1}
 
 
-def test_generate_model_payload_rejects_malformed_json():
-    client = _client_with_response("```json\nnot json\n```")
+def test_generate_draft_payload_rejects_malformed_json():
+    client = _client_with_responses(["```json\nnot json\n```"])
 
     with pytest.raises(RuntimeError, match="not valid JSON"):
-        client.generate_model_payload("Describe the schema")
+        client.generate_draft_payload([{"role": "user", "content": "Describe"}])
 
 
-def test_generate_model_payload_preserves_role_and_cardinality_fields():
-    response = (
-        "{"\
-        "\"entities\": [{\"name\": \"Order\", \"role\": \"fact\"}], "
-        "\"relationships\": [{\"from\": \"Order\", \"to\": \"Customer\","
-        " \"type\": \"references\", \"cardinality_from\": \"many\","
-        " \"cardinality_to\": \"one\"}]}"
+def test_generate_critique_payload_returns_amended_model_when_present():
+    critique_response = (
+        "{"  #
+        "\"issues\": [\"Missing customer relationship\"],"
+        " \"amended_model\": {\"summary\": \"Revised\", \"changes\": [\"Added link\"]}}"
     )
-    client = _client_with_response(response)
+    client = _client_with_responses([critique_response])
 
-    payload = client.generate_model_payload("Describe the schema")
+    critique_payload, amended_payload = client.generate_critique_payload(
+        [{"role": "user", "content": "Critique"}]
+    )
 
-    assert payload["entities"][0]["role"] == "fact"
-    assert payload["relationships"][0]["cardinality_from"] == "many"
-    assert payload["relationships"][0]["cardinality_to"] == "one"
+    assert critique_payload["issues"] == ["Missing customer relationship"]
+    assert amended_payload == {"summary": "Revised", "changes": ["Added link"]}
+
+
+def test_generate_critique_payload_handles_string_amended_model():
+    critique_response = (
+        "{"  #
+        "\"amended_model\": \"{\\\"summary\\\": \\\"Revised\\\"}\"}"
+    )
+    client = _client_with_responses([critique_response])
+
+    _payload, amended_payload = client.generate_critique_payload(
+        [{"role": "user", "content": "Critique"}]
+    )
+
+    assert amended_payload == {"summary": "Revised"}
