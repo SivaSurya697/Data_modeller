@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Exports · Data Modeller{% endblock %}
+{% block content %}
+<h2>Exports</h2>
+<form method="post">
+    <label for="model_id">Model</label>
+    <select id="model_id" name="model_id" required>
+        <option value="" disabled selected>Select a model</option>
+        {% for model in models %}
+            <option value="{{ model.id }}">{{ model.name }} ({{ model.domain.name }})</option>
+        {% endfor %}
+    </select>
+
+    <label for="exporter">Exporter</label>
+    <select id="exporter" name="exporter" required>
+        <option value="dictionary">Data dictionary</option>
+        <option value="plantuml">PlantUML</option>
+    </select>
+
+    <button type="submit">Generate Export</button>
+</form>
+
+{% if exports %}
+<table class="table">
+    <thead>
+    <tr>
+        <th>Model</th>
+        <th>Exporter</th>
+        <th>Created</th>
+        <th>File</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for item in exports %}
+        <tr>
+            <td>{{ item.model.name }}</td>
+            <td>{{ item.exporter|title }}</td>
+            <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td><a href="{{ url_for('exports.download', export_id=item.id) }}">Download</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No exports generated yet.</p>
+{% endif %}
+{% endblock %}

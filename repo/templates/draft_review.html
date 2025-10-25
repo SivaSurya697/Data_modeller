@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Draft Review · Data Modeller{% endblock %}
+{% block content %}
+<h2>Model Draft Review</h2>
+<p>Generate a new model proposal with the latest context for a domain.</p>
+<form method="post">
+    <label for="domain_id">Domain</label>
+    <select id="domain_id" name="domain_id" required>
+        <option value="" disabled selected>Select a domain</option>
+        {% for domain in domains %}
+            <option value="{{ domain.id }}">{{ domain.name }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="instructions">Additional instructions</label>
+    <textarea id="instructions" name="instructions" rows="6" placeholder="Clarify modelling requirements or constraints."></textarea>
+    <button type="submit">Generate Draft</button>
+</form>
+
+{% if draft %}
+<section>
+    <h3>Draft Summary</h3>
+    <p>{{ draft.summary }}</p>
+</section>
+<section>
+    <h3>Draft Definition</h3>
+    <pre>{{ draft.definition }}</pre>
+</section>
+<section>
+    <h3>Impact Assessment</h3>
+    {% if draft.impact %}
+        <ul>
+        {% for item in draft.impact %}
+            <li>{{ item }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>No impact detected.</p>
+    {% endif %}
+</section>
+{% endif %}
+{% endblock %}

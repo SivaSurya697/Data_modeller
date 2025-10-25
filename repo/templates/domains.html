@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}Domains · Data Modeller{% endblock %}
+{% block content %}
+<h2>Domains</h2>
+<form method="post">
+    <label for="name">Domain name</label>
+    <input id="name" name="name" type="text" required>
+    <label for="description">Description</label>
+    <textarea id="description" name="description" rows="4" required></textarea>
+    <button type="submit">Create Domain</button>
+</form>
+
+{% if domains %}
+<table class="table">
+    <thead>
+    <tr>
+        <th>Name</th>
+        <th>Description</th>
+        <th>Models</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for domain in domains %}
+        <tr>
+            <td>{{ domain.name }}</td>
+            <td>{{ domain.description }}</td>
+            <td>
+                {% if domain.models %}
+                    <ul>
+                        {% for model in domain.models %}
+                            <li>{{ model.name }} – {{ model.summary }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    No models yet.
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No domains defined.</p>
+{% endif %}
+{% endblock %}

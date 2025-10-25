@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Settings · Data Modeller{% endblock %}
+{% block content %}
+<h2>Application Settings</h2>
+<section>
+    <p><strong>Environment:</strong> {{ config.environment }}</p>
+    <p><strong>Database:</strong> {{ config.database_url }}</p>
+    <p><strong>OpenAI Base URL:</strong> {{ config.openai_base_url }}</p>
+    <p><strong>Requests per minute:</strong> {{ config.rate_limit_per_minute }}</p>
+</section>
+
+<h3>Persisted Settings</h3>
+<form method="post">
+    <label for="key">Key</label>
+    <input id="key" name="key" type="text" required>
+    <label for="value">Value</label>
+    <textarea id="value" name="value" rows="3" required></textarea>
+    <button type="submit">Save Setting</button>
+</form>
+
+{% if settings %}
+<table class="table">
+    <thead>
+    <tr>
+        <th>Key</th>
+        <th>Value</th>
+        <th>Updated</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for item in settings %}
+        <tr>
+            <td><code>{{ item.key }}</code></td>
+            <td>{{ item.value }}</td>
+            <td>{{ item.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No settings stored yet.</p>
+{% endif %}
+{% endblock %}
