@@ -6,20 +6,18 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 from flask.typing import ResponseReturnValue
 
-from src.models.db import session_scope
-from src.services.model_generation import (
-    compact_prior_context,
-    draft_extend,
-    draft_fresh,
-)
-from src.services.settings import load_settings
+from src.models.db import get_db
+from src.models.tables import Domain
+from src.services.llm_modeler import ModelingService
+from src.services.validators import DraftRequest
 
 bp = Blueprint("model", __name__, url_prefix="/api/model")
 
 
-@bp.post("/draft")
-def create_draft() -> ResponseReturnValue:
-    """Generate a fresh model draft for the requested domain."""
+def _load_domains() -> list[Domain]:
+    with get_db() as session:
+        domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
+    return domains
 
     payload = request.get_json(silent=True) or {}
     raw_domain = payload.get("domain")
@@ -61,16 +59,21 @@ def create_draft() -> ResponseReturnValue:
         return jsonify({"error": str(exc)}), 400
 
 
-@bp.post("/extend")
-def extend_draft() -> ResponseReturnValue:
-    """Placeholder endpoint for future model extension flows."""
+    service = ModelingService()
 
     payload = request.get_json(silent=True) or {}
     try:
-        with session_scope() as session:
-            result = draft_extend(session=session, payload=payload)
-    except NotImplementedError as exc:
-        return jsonify({"error": str(exc)}), 501
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(result)
+        with get_db() as session:
+            result = service.generate_draft(session, payload)
+            draft = {
+                "summary": result.model.summary,
+                "definition": result.model.definition,
+                "impact": result.impact,
+            }
+    except Exception as exc:
+        flash(f"Draft generation failed: {exc}", "error")
+        return redirect(url_for("modeler.draft_review"))
+
+    flash("Draft generated successfully.", "success")
+    domains = _load_domains()
+    return render_template("draft_review.html", domains=domains, draft=draft)

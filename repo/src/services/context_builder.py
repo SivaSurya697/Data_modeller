@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import ChangeSet, DataModel, Domain, Setting
+from src.models.tables import ChangeSet, DataModel, Domain
 
 
 @dataclass(slots=True)
@@ -37,11 +37,15 @@ class DomainContext:
                 )
             sections.append("Existing Models:\n" + "\n\n".join(model_lines))
         if self.changes:
-            change_lines = "\n".join(
-                f"- {change.created_at:%Y-%m-%d}: {change.description}"
-                for change in self.changes
-            )
-            sections.append(f"Recent Changes:\n{change_lines}")
+            change_lines: list[str] = []
+            for change in self.changes:
+                summary = change.title
+                if change.description:
+                    summary = f"{summary} — {change.description}"
+                change_lines.append(
+                    f"- {change.created_at:%Y-%m-%d} [{change.state}] {summary}"
+                )
+            sections.append(f"Recent Changes:\n" + "\n".join(change_lines))
         return sections
 
 
@@ -57,10 +61,7 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
             select(DataModel).where(DataModel.domain_id == domain_id).order_by(DataModel.updated_at.desc())
         ).scalars()
     )
-    settings = {
-        setting.key: setting.value
-        for setting in session.execute(select(Setting)).scalars()
-    }
+    settings: dict[str, str] = {}
     changes = list(
         session.execute(
             select(ChangeSet)
