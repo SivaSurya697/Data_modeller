@@ -187,6 +187,7 @@ class SourceProfileRequest(BaseModel):
 
 __all__ = [
     "ChangeSetInput",
+    "CoverageAnalysisRequest",
     "DomainInput",
     "DraftRequest",
     "AttributeSpec",

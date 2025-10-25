@@ -226,3 +226,48 @@ code {
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
 }
+
+
+.quality-dashboard {
+    background: #fff;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.quality-selector {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.quality-selector label {
+    margin-bottom: 0;
+}
+
+.quality-selector select {
+    width: auto;
+    min-width: 200px;
+}
+
+.coverage-summary ul {
+    list-style: disc;
+    padding-left: 1.5rem;
+}
+
+.coverage-summary .coverage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+}
+
+.coverage-summary .issues li {
+    color: #922b21;
+    font-weight: 600;
+}
+
+.coverage-summary .gaps li {
+    color: #b9770e;
+    font-weight: 600;
+}
