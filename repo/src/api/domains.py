@@ -21,7 +21,9 @@ def _load_domains() -> list[Domain]:
                 select(Domain)
                 .options(joinedload(Domain.entities).joinedload(Entity.attributes))
                 .order_by(Domain.name)
-            ).scalars()
+            )
+            .unique()
+            .scalars()
         )
     return domains
 
