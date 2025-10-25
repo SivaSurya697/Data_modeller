@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 import pytest
+from sqlalchemy import select
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
@@ -30,9 +31,9 @@ def client(app):
     return app.test_client()
 
 
-def test_sources_blueprints_registered(app):
+def test_sources_blueprint_registered(app):
     assert "sources_api" in app.blueprints
-    assert "sources" in app.blueprints
+    assert "sources" not in app.blueprints
 
 
 @pytest.fixture
@@ -43,77 +44,88 @@ def session():
 
 def _import_sample(client):
     payload = {
-        "system": {
-            "name": "Analytics Warehouse",
-            "description": "Demo warehouse",
-            "connection_type": "snowflake",
-            "connection_config": {"account": "acme"},
-        },
-        "tables": [
+        "sources": [
             {
-                "schema_name": "PUBLIC",
-                "table_name": "ORDERS",
-                "columns": [
-                    {"name": "ORDER_ID", "data_type": "NUMBER", "is_nullable": False},
-                    {"name": "STATUS", "data_type": "STRING"},
-                ],
+                "name": "analytics.orders",
+                "description": "Order fact table",
+                "schema": {
+                    "columns": [
+                        {"name": "order_id", "data_type": "number"},
+                        {"name": "status", "data_type": "string"},
+                    ]
+                },
+                "stats": {"row_count": 120},
+                "row_count": 120,
             }
-        ],
+        ]
     }
     response = client.post("/api/sources/import", json=payload)
-    assert response.status_code == 201
+    assert response.status_code == 200
     return response.get_json()
 
 
 def test_import_endpoint_persists_metadata(client, session):
     result = _import_sample(client)
-    assert result["name"] == "Analytics Warehouse"
+    assert result["created"] == 1
+    assert result["updated"] == 0
+    assert len(result["sources"]) == 1
     session.expire_all()
     system = session.query(SourceSystem).one()
-    assert system.connection_type == "snowflake"
-    assert len(system.tables) == 1
-    assert system.tables[0].table_name == "ORDERS"
+    assert system.name == "default"
+    table = session.query(SourceTable).one()
+    assert table.schema_name == "analytics"
+    assert table.table_name == "orders"
+    assert table.schema_definition["columns"][0]["name"] == "order_id"
+    assert table.row_count == 120
 
 
-def test_profile_endpoint_updates_statistics(client, session):
-    imported = _import_sample(client)
-    table_id = imported["tables"][0]["id"]
+def test_import_endpoint_is_idempotent(client, session):
+    first = _import_sample(client)
+    assert first["created"] == 1
+    second = _import_sample(client)
+    assert second["created"] == 0
+    assert second["updated"] == 0
+    session.expire_all()
+    assert session.query(SourceTable).count() == 1
+
+
+def test_profile_endpoint_merges_statistics(client, session):
+    _import_sample(client)
     payload = {
-        "table_id": table_id,
-        "rows": [
-            {"ORDER_ID": 1, "STATUS": "NEW"},
-            {"ORDER_ID": 2, "STATUS": "SHIPPED"},
+        "name": "analytics.orders",
+        "preview_rows": [
+            {"order_id": 1, "status": "NEW"},
+            {"order_id": 2, "status": "SHIPPED"},
         ],
-        "total_rows": 2,
+        "row_count": 120,
     }
     response = client.post("/api/sources/profile", json=payload)
     assert response.status_code == 200
-    data = response.get_json()
-    assert data["sampled_row_count"] == 2
-    assert data["table_statistics"]["sampled_row_count"] == 2
-    order_column = next(col for col in data["columns"] if col["name"] == "ORDER_ID")
-    assert order_column["statistics"]["total"] == 2
+    data = response.get_json()["source"]
+    assert data["row_count"] == 120
+    assert data["stats"]["sampled_row_count"] == 2
+    assert "columns" in data["stats"]
+    status_stats = data["stats"]["columns"]["status"]["statistics"]
+    assert status_stats["total"] == 2
 
     session.expire_all()
-    table = session.get(SourceTable, table_id)
-    assert table is not None
+    table = session.execute(select(SourceTable)).scalar_one()
     assert table.sampled_row_count == 2
-    assert table.columns[0].statistics is not None
+    assert table.table_statistics["row_count"] == 120
+    assert "status" in table.table_statistics["columns"]
 
 
-def test_list_sources_returns_nested_structure(client):
+def test_get_list_and_detail_endpoints(client):
     _import_sample(client)
-    response = client.get("/api/sources/")
-    assert response.status_code == 200
-    data = response.get_json()
-    assert isinstance(data, list)
-    assert data[0]["tables"][0]["columns"][0]["name"] == "ORDER_ID"
+    list_response = client.get("/api/sources/")
+    assert list_response.status_code == 200
+    listing = list_response.get_json()
+    assert listing["sources"][0]["name"] == "analytics.orders"
 
+    detail_response = client.get("/api/sources/analytics.orders")
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()["source"]
+    assert detail["schema"]["columns"][1]["name"] == "status"
 
-def test_sources_page_renders(client):
-    _import_sample(client)
-    response = client.get("/sources/")
-    assert response.status_code == 200
-    html = response.data.decode()
-    assert "Source Registry" in html
-    assert "ORDERS" in html
+    missing_response = client.get("/api/sources/unknown")
+    assert missing_response.status_code == 404

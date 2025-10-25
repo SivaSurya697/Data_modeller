@@ -2,9 +2,11 @@
 
 from . import (  # noqa: F401
     changesets,
+    coverage,
     domains,
     exports,
     model,
+    quality,
     relationships,
     settings,
     sources,
@@ -12,9 +14,11 @@ from . import (  # noqa: F401
 
 __all__ = [
     "changesets",
+    "coverage",
     "domains",
     "exports",
     "model",
+    "quality",
     "relationships",
     "settings",
     "sources",
