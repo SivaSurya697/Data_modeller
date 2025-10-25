@@ -1,6 +1,7 @@
 """Database session management utilities."""
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -9,7 +10,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
 from src.models.tables import Base
-from src.services.settings import load_settings
 
 _ENGINE: Engine | None = None
 _SESSION_FACTORY: scoped_session[Session] | None = None
@@ -18,8 +18,7 @@ _SESSION_FACTORY: scoped_session[Session] | None = None
 def init_engine(database_url: str | None = None) -> Engine:
     """Initialise the SQLAlchemy engine and session factory."""
 
-    settings = load_settings()
-    url = database_url or settings.database_url
+    url = database_url or os.getenv("DATABASE_URL", "sqlite:///data_modeller.db")
     engine = create_engine(url, future=True)
     session_factory = scoped_session(
         sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)

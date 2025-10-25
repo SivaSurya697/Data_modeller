@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models.tables import ChangeSet, DataModel, Domain, Setting
+from src.models.tables import ChangeSet, DataModel, Domain
 
 
 @dataclass(slots=True)
@@ -57,10 +57,7 @@ def load_context(session: Session, domain_id: int) -> DomainContext:
             select(DataModel).where(DataModel.domain_id == domain_id).order_by(DataModel.updated_at.desc())
         ).scalars()
     )
-    settings = {
-        setting.key: setting.value
-        for setting in session.execute(select(Setting)).scalars()
-    }
+    settings: dict[str, str] = {}
     changes = list(
         session.execute(
             select(ChangeSet)
