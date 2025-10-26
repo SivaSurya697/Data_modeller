@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from slugify import slugify
 
@@ -12,6 +14,7 @@ from src.services.model_analysis import (
     extract_relationship_cardinality,
     infer_model_version,
 )
+from src.services.exporters.utils import prepare_artifact_path
 
 
 def _class_name(entity: Entity) -> str:
@@ -122,3 +125,128 @@ def export_plantuml(domain: Domain, output_dir: Path) -> Path:
 
 
 __all__ = ["export_plantuml"]
+
+
+def _normalise_entities(model_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    entities = model_payload.get("entities")
+    if not isinstance(entities, list):
+        return []
+    normalised: list[dict[str, Any]] = []
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        name = str(entity.get("name") or "").strip()
+        if not name:
+            continue
+        role = str(entity.get("role") or "").strip().lower()
+        attributes = entity.get("attributes")
+        if not isinstance(attributes, list):
+            attributes = []
+        normalised.append(
+            {
+                "name": name,
+                "role": role,
+                "description": str(entity.get("description") or "").strip(),
+                "attributes": [
+                    {
+                        "name": str(attribute.get("name") or "").strip(),
+                        "data_type": str(attribute.get("data_type") or "").strip(),
+                        "is_nullable": bool(attribute.get("is_nullable", True)),
+                    }
+                    for attribute in attributes
+                    if isinstance(attribute, dict)
+                ],
+            }
+        )
+    return normalised
+
+
+def _normalise_relationships(model_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    relationships = model_payload.get("relationships")
+    if not isinstance(relationships, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for relationship in relationships:
+        if not isinstance(relationship, dict):
+            continue
+        result.append(
+            {
+                "from": str(
+                    relationship.get("from")
+                    or relationship.get("source")
+                    or relationship.get("from_entity")
+                    or ""
+                ).strip(),
+                "to": str(
+                    relationship.get("to")
+                    or relationship.get("target")
+                    or relationship.get("to_entity")
+                    or ""
+                ).strip(),
+                "type": str(relationship.get("type") or "").strip(),
+                "description": str(relationship.get("description") or "").strip(),
+            }
+        )
+    return result
+
+
+def emit_plantuml(model_json_str: str, out_path: str) -> None:
+    """Write a PlantUML diagram based on ``model_json_str``."""
+
+    try:
+        payload = json.loads(model_json_str)
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
+        raise ValueError("Invalid model JSON") from exc
+
+    entities = _normalise_entities(payload)
+    relationships = _normalise_relationships(payload)
+
+    title = str(payload.get("name") or payload.get("domain") or "Model Diagram").strip()
+    if not title:
+        title = "Model Diagram"
+
+    output_path = prepare_artifact_path(Path(out_path).parent, Path(out_path).name)
+
+    lines: list[str] = [
+        "@startuml",
+        "skinparam classAttributeIconSize 0",
+        f"title {title}",
+    ]
+
+    for entity in entities:
+        stereotype = None
+        if entity["role"] == "fact":
+            stereotype = "Fact"
+        elif entity["role"] == "dimension":
+            stereotype = "Dimension"
+
+        header = f"class {entity['name']}"
+        if stereotype:
+            header += f" <<{stereotype}>>"
+        lines.append(header + " {")
+        if entity["description"]:
+            for description_line in entity["description"].splitlines():
+                lines.append(f"  ' {description_line}")
+        for attribute in entity["attributes"]:
+            nullable = "?" if attribute["is_nullable"] else "!"
+            lines.append(
+                f"  {attribute['name']}: {attribute['data_type'] or 'unspecified'} {nullable}"
+            )
+        lines.append("}")
+
+    for relationship in relationships:
+        if not (relationship["from"] and relationship["to"]):
+            continue
+        relation_line = f"{relationship['from']} --> {relationship['to']}"
+        if relationship["type"]:
+            relation_line += f" : {relationship['type']}"
+        lines.append(relation_line)
+        if relationship["description"]:
+            for description_line in relationship["description"].splitlines():
+                lines.append(f"' {description_line}")
+
+    lines.append("@enduml")
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+__all__.append("emit_plantuml")
