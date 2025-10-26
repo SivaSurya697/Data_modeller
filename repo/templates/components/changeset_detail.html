@@ -1,0 +1,46 @@
+<section class="changeset-detail">
+    <header class="changeset-detail__header">
+        <h3>{{ change_set.title }}</h3>
+        <span class="state-badge state-{{ change_set.state }}">{{ change_set.state.replace('_', ' ')|title }}</span>
+    </header>
+    <p class="muted">Domain: {{ change_set.domain.name if change_set.domain }} · Created {{ change_set.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <div class="changeset-actions">
+        <button hx-post="{{ url_for('changesets_api.update_changeset_state', change_set_id=change_set.id) }}"
+                hx-target="#cs-detail"
+                hx-swap="innerHTML"
+                hx-vals='{"state":"in_review"}'
+                {% if change_set.state not in ['draft', 'in_review'] %}disabled{% endif %}>
+            Send to Review
+        </button>
+        <button hx-post="{{ url_for('changesets_api.update_changeset_state', change_set_id=change_set.id) }}"
+                hx-target="#cs-detail"
+                hx-swap="innerHTML"
+                hx-vals='{"state":"approved"}'
+                {% if change_set.state != 'in_review' %}disabled{% endif %}>
+            Approve
+        </button>
+    </div>
+
+    {% if change_set.items %}
+        {% for item in change_set.items %}
+            <details open>
+                <summary>[{{ item.object_type }}] {{ item.action }}{% if item.target %} {{ item.target }}{% endif %}</summary>
+                <div class="grid-2">
+                    <div>
+                        <h4>Before</h4>
+                        <pre>{{ item.before_json | tojson(indent=2) }}</pre>
+                    </div>
+                    <div>
+                        <h4>After</h4>
+                        <pre>{{ item.after_json | tojson(indent=2) }}</pre>
+                    </div>
+                </div>
+                {% if item.rationale %}
+                    <p class="muted">Rationale: {{ item.rationale }}</p>
+                {% endif %}
+            </details>
+        {% endfor %}
+    {% else %}
+        <p>No change items recorded.</p>
+    {% endif %}
+</section>

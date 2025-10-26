@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Sequence, TypeVar
@@ -347,5 +348,36 @@ class ModelingService:
         )
 
 
-__all__ = ["DraftResult", "ModelingService"]
+def draft_extend(
+    session: Session,
+    *,
+    domain: str,
+    prior_excerpt_json: str,
+    user_id: int | str = DEFAULT_USER_ID,
+) -> str:
+    """Request a model extension diff from the language model."""
+
+    user_identifier = str(user_id)
+    settings = get_user_settings(session, user_identifier)
+    client = LLMClient(settings)
+    system_message = (
+        "You are a senior dimensional modeller extending an existing model. "
+        "Return JSON with 'proposed_changes' and 'dictionary_updates'."
+    )
+    user_message = (
+        f"Generate an extension diff for the domain '{domain}'.\n"
+        "Baseline model JSON:\n"
+        f"{prior_excerpt_json}\n"
+        "Respond strictly with JSON."
+    )
+    payload = client.json_chat_complete(
+        [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ]
+    )
+    return json.dumps(payload)
+
+
+__all__ = ["DraftResult", "ModelingService", "draft_extend"]
 

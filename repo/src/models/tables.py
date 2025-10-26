@@ -289,9 +289,41 @@ class ChangeSet(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     author: Mapped[str] = mapped_column(String(255), nullable=False, default="system")
+    created_by: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="draft", server_default="draft"
+    )
 
     domain: Mapped[Domain] = relationship("Domain", back_populates="change_sets")
     model: Mapped[DataModel | None] = relationship("DataModel")
+    items: Mapped[list["ChangeItem"]] = relationship(
+        "ChangeItem",
+        back_populates="change_set",
+        cascade="all, delete-orphan",
+        order_by="ChangeItem.id",
+    )
+
+
+class ChangeItem(Base, TimestampMixin):
+    """Individual change captured as part of a change set review."""
+
+    __tablename__ = "change_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    change_set_id: Mapped[int] = mapped_column(
+        ForeignKey("change_sets.id", ondelete="CASCADE"), nullable=False
+    )
+    object_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    object_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    target: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    before_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    after_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    change_set: Mapped[ChangeSet] = relationship("ChangeSet", back_populates="items")
 
 
 class ReviewTask(Base, TimestampMixin):
