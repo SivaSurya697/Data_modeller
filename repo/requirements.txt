@@ -10,3 +10,5 @@ openai>=1.40
 pandas>=2.2
 rapidfuzz>=3.8
 python-slugify>=8.0
+
+jsonschema>=4.0

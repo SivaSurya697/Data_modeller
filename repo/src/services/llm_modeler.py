@@ -34,6 +34,7 @@ from src.services import validators
 from src.services.validators import DraftRequest, EntitySpec, ModelDraftPayload
 from src.services.model_analysis import infer_model_version
 from pydantic import ValidationError
+from src.services.json_schemas import MODEL_SCHEMA, validate_against_schema
 
 
 @dataclass(slots=True)
@@ -51,17 +52,163 @@ EnumT = TypeVar("EnumT", bound=Enum)
 
 _LOGGER = logging.getLogger(__name__)
 
-SYSTEM_FRESH = """
+SYSTEM_FRESH_TEMPLATE = """
 You are a senior healthcare payor data modeller.
-Produce a LOGICAL model with STAR/SNOWFLAKE discipline:
-- Classify each entity as "role": "fact" or "dimension" (use "other" only if unavoidable).
-- FACTS: must include "grain_json" (list of key columns) AND at least one attribute with "is_measure": true.
-- DIMENSIONS: must include "scd_type" in {"none","scd1","scd2"} AND at least one primary/natural key.
-- For every entity: include keys[], attributes[] with {name, datatype, semantic_type, required, [is_measure? bool], [is_surrogate_key? bool]}.
-- Define relationships with explicit cardinalities (one_to_many, many_to_one, one_to_one, many_to_many) and a short rule.
-- Use snake_case for all names. Do not mirror raw sources. Prefer canonical payor constructs.
-Output STRICT JSON with keys: entities, relationships, dictionary, shared_dim_refs. No prose.
+
+REQUIREMENTS (must pass JSON Schema and deterministic validator):
+- Each entity has "role": "fact" or "dimension" (use "other" only if unavoidable).
+- FACTS MUST include:
+   - "grain_json": list of key columns
+   - at least one attribute with "is_measure": true
+- DIMENSIONS MUST include:
+   - "scd_type": one of "none","scd1","scd2"
+- Provide keys[], attributes[] with {name, datatype, semantic_type, required, [is_measure], [is_surrogate_key]}.
+- Provide relationships[] with type in {"one_to_one","one_to_many","many_to_one","many_to_many"} and a short rule.
+- Use snake_case names. Do not mirror raw sources.
+
+OUTPUT:
+Return STRICT JSON ONLY with keys: entities, relationships, dictionary, shared_dim_refs.
+No markdown, no prose.
+
+JSON SCHEMA (you must conform exactly):
+{schema_json_here}
 """
+
+FEWSHOT = """
+Example (abbreviated):
+{
+  "entities": [
+    {
+      "name": "claim_fact",
+      "role": "fact",
+      "attributes": [
+        {"name":"claim_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"total_amount","datatype":"decimal","semantic_type":"MONEY","required":true,"is_measure":true}
+      ],
+      "keys":[{"type":"primary","columns":["claim_id"]}],
+      "grain_json": ["claim_id"]
+    },
+    {
+      "name": "beneficiary",
+      "role": "dimension",
+      "attributes": [
+        {"name":"beneficiary_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"date_of_birth","datatype":"date","semantic_type":"DATE","required":false}
+      ],
+      "keys":[{"type":"natural","columns":["beneficiary_id"]}],
+      "scd_type": "scd1",
+      "is_shared_dim": true
+    }
+  ],
+  "relationships": [
+    {"from":"claim_fact","to":"beneficiary","type":"many_to_one","rule":"each claim references one beneficiary"}
+  ],
+  "dictionary": [{"term":"claim","definition":"A submitted request for payment"}],
+  "shared_dim_refs": ["beneficiary"]
+}
+"""
+
+FEWSHOT_EXAMPLES: dict[str, str] = {
+    "claims": """
+Example (claims-specific):
+{
+  "entities": [
+    {
+      "name": "claim_fact",
+      "role": "fact",
+      "grain_json": ["claim_id"],
+      "attributes": [
+        {"name":"claim_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"allowed_amount","datatype":"decimal","semantic_type":"MONEY","required":true,"is_measure":true}
+      ],
+      "keys":[{"type":"primary","columns":["claim_id"]}]
+    },
+    {
+      "name": "provider_dimension",
+      "role": "dimension",
+      "scd_type": "scd1",
+      "attributes": [
+        {"name":"provider_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"provider_type","datatype":"string","semantic_type":"CATEGORY","required":false}
+      ],
+      "keys":[{"type":"natural","columns":["provider_id"]}]
+    }
+  ],
+  "relationships": [
+    {"from":"claim_fact","to":"provider_dimension","type":"many_to_one","rule":"claims reference a servicing provider"}
+  ],
+  "dictionary": [],
+  "shared_dim_refs": ["provider_dimension"]
+}
+""",
+    "eligibility": """
+Example (eligibility-specific):
+{
+  "entities": [
+    {
+      "name": "eligibility_fact",
+      "role": "fact",
+      "grain_json": ["member_id", "effective_date"],
+      "attributes": [
+        {"name":"member_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"effective_date","datatype":"date","semantic_type":"DATE","required":true},
+        {"name":"premium_amount","datatype":"decimal","semantic_type":"MONEY","required":false,"is_measure":true}
+      ],
+      "keys":[{"type":"primary","columns":["member_id", "effective_date"]}]
+    },
+    {
+      "name": "plan_dimension",
+      "role": "dimension",
+      "scd_type": "scd2",
+      "attributes": [
+        {"name":"plan_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"plan_name","datatype":"string","semantic_type":"NAME","required":true}
+      ],
+      "keys":[{"type":"natural","columns":["plan_id"]}]
+    }
+  ],
+  "relationships": [
+    {"from":"eligibility_fact","to":"plan_dimension","type":"many_to_one","rule":"eligibility rows reference a plan"}
+  ],
+  "dictionary": [],
+  "shared_dim_refs": ["plan_dimension"]
+}
+""",
+    "provider": """
+Example (provider-specific):
+{
+  "entities": [
+    {
+      "name": "provider_fact",
+      "role": "fact",
+      "grain_json": ["provider_id"],
+      "attributes": [
+        {"name":"provider_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"encounter_count","datatype":"integer","semantic_type":"COUNT","required":true,"is_measure":true}
+      ],
+      "keys":[{"type":"primary","columns":["provider_id"]}]
+    },
+    {
+      "name": "provider_profile",
+      "role": "dimension",
+      "scd_type": "scd1",
+      "attributes": [
+        {"name":"provider_id","datatype":"string","semantic_type":"ID","required":true},
+        {"name":"specialty","datatype":"string","semantic_type":"CATEGORY","required":false}
+      ],
+      "keys":[{"type":"natural","columns":["provider_id"]}]
+    }
+  ],
+  "relationships": [
+    {"from":"provider_fact","to":"provider_profile","type":"many_to_one","rule":"provider aggregates link to provider profiles"}
+  ],
+  "dictionary": [],
+  "shared_dim_refs": ["provider_profile"]
+}
+""",
+}
+
+MAX_AUTOCORRECT_ATTEMPTS = 3
 
 SYSTEM_REFINE = """
 You are a modelling reviewer. Fix ONLY metadata gaps without renaming existing fields unless required:
@@ -70,26 +217,6 @@ You are a modelling reviewer. Fix ONLY metadata gaps without renaming existing f
 - Add "scd_type" to every DIMENSION if missing; prefer "scd1" unless historical tracking is evident, then "scd2".
 Return STRICT JSON: {"amended_model": <full corrected model>}. No commentary.
 """
-
-_METADATA_ISSUE_PATTERNS: tuple[str, ...] = (
-    "must define a non-empty grain",
-    "must include at least one measure",
-    "must declare an scd type",
-)
-
-
-def _issues_are_metadata_only(issues: Sequence[str]) -> bool:
-    """Return ``True`` when all issues relate to grain, measures, or SCD metadata."""
-
-    filtered = [issue.strip() for issue in issues if isinstance(issue, str) and issue.strip()]
-    if not filtered:
-        return False
-    for issue in filtered:
-        lower_issue = issue.lower()
-        if not any(pattern in lower_issue for pattern in _METADATA_ISSUE_PATTERNS):
-            return False
-    return True
-
 
 def _build_fresh_user_prompt(context: DomainContext, instructions: str | None) -> str:
     """Assemble the user prompt for the fresh draft pass."""
@@ -104,6 +231,55 @@ def _build_fresh_user_prompt(context: DomainContext, instructions: str | None) -
         "Emphasise canonical payor facts and dimensions with complete metadata."
     )
     return "\n\n".join(sections)
+
+
+def prompt_fresh(
+    context: DomainContext, instructions: str | None, domain_name: str
+) -> list[dict[str, str]]:
+    """Build the message list for a fresh draft request."""
+
+    schema_json = json.dumps(MODEL_SCHEMA, indent=2, sort_keys=True)
+    system_prompt = SYSTEM_FRESH_TEMPLATE.replace("{schema_json_here}", schema_json)
+
+    system_sections = [system_prompt.strip(), FEWSHOT.strip()]
+    domain_lower = domain_name.lower()
+    for key, snippet in FEWSHOT_EXAMPLES.items():
+        if key in domain_lower:
+            system_sections.append(snippet.strip())
+    system_message = "\n\n".join(section for section in system_sections if section)
+
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": _build_fresh_user_prompt(context, instructions)},
+    ]
+    return messages
+
+
+def _list_schema_violations(model_obj: dict[str, Any]) -> list[str]:
+    """Return human readable schema violations for *model_obj*."""
+
+    _, errors = validate_against_schema(model_obj)
+    return list(errors)
+
+
+def _correction_prompt(violations: list[str], last_model_json: str) -> list[dict[str, str]]:
+    """Build a targeted correction prompt for the supplied *violations*."""
+
+    bullet_list = "\n".join(f"- {violation}" for violation in violations)
+    user_content = (
+        "Violations:\n"
+        f"{bullet_list if bullet_list else '- none listed'}\n\n"
+        "Previous JSON:\n"
+        f"{last_model_json}"
+    )
+    system_content = (
+        "You're correcting the last JSON to satisfy the schema and validator. "
+        "Do not add prose; return STRICT JSON. Fix only the missing fields. Preserve all existing names."
+    )
+    return [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_content},
+    ]
 
 
 class ModelingService:
@@ -447,8 +623,8 @@ def draft_fresh(
     domain_name: str,
     user_id: int | str = DEFAULT_USER_ID,
     instructions: str | None = None,
-) -> tuple[str, bool, dict[str, Any]]:
-    """Generate a fresh model draft and optionally trigger metadata refinement."""
+) -> tuple[str, int, list[str], dict[str, Any]]:
+    """Generate a fresh model draft with iterative schema corrections."""
 
     if not domain_name:
         raise ValueError("Domain name must be provided")
@@ -460,32 +636,10 @@ def draft_fresh(
 
     context = load_context(db, domain.id)
     instructions_text = instructions if instructions is None else str(instructions)
-    user_prompt = _build_fresh_user_prompt(context, instructions_text)
 
     user_identifier = str(user_id)
     settings = get_user_settings(db, user_identifier)
     client = LLMClient(settings)
-    messages = [
-        {"role": "system", "content": SYSTEM_FRESH.strip()},
-        {"role": "user", "content": user_prompt},
-    ]
-    payload_raw = client.json_chat_complete(messages, temperature=0.1, max_tokens=3500)
-    if not isinstance(payload_raw, Mapping):
-        raise RuntimeError("LLM response did not return a JSON object")
-
-    payload = dict(payload_raw)
-    payload.setdefault("entities", [])
-    payload.setdefault("relationships", [])
-    payload.setdefault("dictionary", [])
-    payload.setdefault("shared_dim_refs", [])
-
-    model_json_str = json.dumps(payload, ensure_ascii=False)
-    entity_count = len(payload.get("entities", [])) if isinstance(payload.get("entities"), list) else 0
-    _LOGGER.info(
-        "Draft fresh model generated length=%s entities=%s",
-        len(model_json_str),
-        entity_count,
-    )
 
     context_used = {
         "domain_id": context.domain.id,
@@ -497,34 +651,73 @@ def draft_fresh(
         "instructions_supplied": bool(instructions_text and instructions_text.strip()),
     }
 
-    validation = validators.validate_model_json(model_json_str)
-    issues = validation.get("issues", []) if isinstance(validation, Mapping) else []
-    if validation.get("ok", False):
-        return model_json_str, False, context_used
+    messages = prompt_fresh(context, instructions_text, domain.name)
 
-    if _issues_are_metadata_only(issues):
-        try:
-            refined_json_str = refine_model_for_metadata(db, user_identifier, model_json_str)
-        except RuntimeError as exc:
-            error = RuntimeError("Draft failed after refine")
-            error.issues = list(issues)
+    last_violations: list[str] = []
+    last_model_json = ""
+
+    for attempt in range(1, MAX_AUTOCORRECT_ATTEMPTS + 1):
+        if attempt == 1:
+            prompt_messages = messages
+        else:
+            prompt_messages = _correction_prompt(last_violations, last_model_json)
+
+        payload_raw = client.json_chat_complete(
+            prompt_messages, temperature=0.0, top_p=0.0, max_tokens=3500
+        )
+        if not isinstance(payload_raw, Mapping):
+            raise RuntimeError("LLM response did not return a JSON object")
+
+        payload = dict(payload_raw)
+        payload.setdefault("entities", [])
+        payload.setdefault("relationships", [])
+        payload.setdefault("dictionary", [])
+        payload.setdefault("shared_dim_refs", [])
+
+        model_json_str = json.dumps(payload, ensure_ascii=False)
+        entity_count = (
+            len(payload.get("entities", []))
+            if isinstance(payload.get("entities"), list)
+            else 0
+        )
+        _LOGGER.info(
+            "Draft fresh attempt=%s length=%s entities=%s",
+            attempt,
+            len(model_json_str),
+            entity_count,
+        )
+
+        schema_errors = _list_schema_violations(payload)
+        validation = validators.validate_model_json(model_json_str)
+        validator_issues = (
+            [str(item) for item in validation.get("issues", []) if str(item).strip()]
+            if isinstance(validation, Mapping)
+            else []
+        )
+
+        if validation.get("ok", False) and not schema_errors:
+            violations_fixed = last_violations if attempt > 1 else []
+            return model_json_str, attempt, violations_fixed, context_used
+
+        violations = [*schema_errors]
+        if not validation.get("ok", False):
+            violations.extend(validator_issues)
+
+        last_violations = violations
+        last_model_json = model_json_str
+
+        if attempt >= MAX_AUTOCORRECT_ATTEMPTS:
+            error = RuntimeError(
+                f"Draft failed after {attempt} correction attempts"
+            )
+            error.violations = list(violations)
             error.model_json = model_json_str
-            error.autorefined = True
             error.context_used = context_used
-            raise error from exc
+            error.autocorrect_attempts = attempt
+            raise error
 
-        refined_validation = validators.validate_model_json(refined_json_str)
-        if refined_validation.get("ok", False):
-            return refined_json_str, True, context_used
-
-        error = RuntimeError("Draft failed after refine")
-        error.issues = refined_validation.get("issues", [])
-        error.model_json = refined_json_str
-        error.autorefined = True
-        error.context_used = context_used
-        raise error
-
-    return model_json_str, False, context_used
+    # This should be unreachable because the loop either returns or raises.
+    raise RuntimeError("Draft generation terminated unexpectedly")
 
 
 def draft_extend(

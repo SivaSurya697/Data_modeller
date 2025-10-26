@@ -69,12 +69,16 @@ class LLMClient:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> Mapping[str, Any]:
         """Return the parsed JSON payload from an arbitrary chat prompt."""
 
         return self._parse_json_payload(
             self._chat_complete(
-                messages, temperature=temperature, max_tokens=max_tokens
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=top_p,
             )
         )
 
@@ -126,6 +130,7 @@ class LLMClient:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> str:
         if not messages:
             raise ValueError("messages must not be empty")
@@ -140,6 +145,8 @@ class LLMClient:
                 }
                 if max_tokens is not None:
                     request_kwargs["max_tokens"] = max_tokens
+                if top_p is not None:
+                    request_kwargs["top_p"] = top_p
                 response = self._client.chat.completions.create(**request_kwargs)
                 if not response.choices:
                     raise RuntimeError("OpenAI response did not include any choices")
