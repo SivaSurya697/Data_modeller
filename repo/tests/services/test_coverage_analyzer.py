@@ -1,60 +1,95 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
+import json
 
 import pytest
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-from src.models import db as db_module
-from src.models.tables import Attribute, Domain, Entity
-from src.services.coverage_analyzer import CoverageAnalyzer
-
-
-@pytest.fixture
-def session(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'coverage.db'}")
-    monkeypatch.setattr(db_module, "_ENGINE", None)
-    monkeypatch.setattr(db_module, "_SESSION_FACTORY", None)
-
-    db_module.init_engine()
-    db_module.create_all()
-
-    with db_module.session_scope() as session:
-        yield session
+from src.services.coverage_analyzer import (
+    analyze_mece,
+    find_collisions,
+    naming_suggestions,
+    parse_model,
+    uncovered_terms,
+)
 
 
-def _seed_domain(session):
-    analytics = Domain(name="Analytics", description="Business intelligence")
+@pytest.fixture()
+def sample_model_json() -> str:
+    model = {
+        "entities": [
+            {
+                "name": "Beneficiary",
+                "attributes": [
+                    {"name": "member_id"},
+                    {"name": "dob"},
+                    {"name": "gender"},
+                ],
+            },
+            {
+                "name": "Provider",
+                "attributes": [
+                    {"name": "provider_id"},
+                    {"name": "provider_name"},
+                    {"name": "specialty"},
+                ],
+            },
+            {
+                "name": "Claim",
+                "attributes": [
+                    {"name": "claim_identifier"},
+                    {"name": "service_date"},
+                ],
+            },
+        ]
+    }
+    return json.dumps(model)
 
-    customer = Entity(name="Customer", description="Stores customer details", domain=analytics)
-    Attribute(name="customer_id", data_type="int", is_nullable=False, entity=customer)
-    Attribute(name="email_address", data_type="string", is_nullable=True, entity=customer)
-    Attribute(name="vip_flag", data_type="boolean", is_nullable=True, entity=customer)
 
-    invoice = Entity(name="Invoice", description="Billing record", domain=analytics)
-    Attribute(name="invoice_id", data_type="string", is_nullable=False, entity=invoice)
-
-    session.add(analytics)
-    session.commit()
-    return analytics
+def test_parse_model_validates_payload(sample_model_json):
+    model = parse_model(sample_model_json)
+    assert isinstance(model, dict)
+    assert len(model["entities"]) == 3
 
 
-def test_analyzer_highlights_collisions_and_gaps(session):
-    domain = _seed_domain(session)
+def test_parse_model_rejects_invalid_json():
+    with pytest.raises(ValueError):
+        parse_model("not-json")
 
-    analyzer = CoverageAnalyzer()
-    report = analyzer.analyze_domain(session, domain.id)
 
-    assert "Customer" in report.entity_overlaps
-    assert "Invoice" in report.entity_collisions
-    assert "Order" in report.uncovered_entities
+def test_find_collisions_detects_similar_attributes(sample_model_json):
+    model = parse_model(sample_model_json)
+    model["entities"].append(
+        {
+            "name": "Remittance",
+            "attributes": [
+                {"name": "claim identifier"},
+                {"name": "payment_amount"},
+            ],
+        }
+    )
+    collisions = find_collisions(model, threshold=0.85)
+    assert collisions
+    assert any("Remittance" in entry["entities"] for entry in collisions)
 
-    assert "customer_id" in report.attribute_overlaps
-    assert "email_address" in report.attribute_overlaps
-    assert "vip_flag" in report.attribute_collisions
-    assert "invoice_id" in report.attribute_collisions
-    assert "order_total" in report.uncovered_attributes
+
+def test_uncovered_terms_reports_missing_entities(sample_model_json):
+    model = parse_model(sample_model_json)
+    missing = uncovered_terms(model)
+    assert any(item["entity"] == "scheme" for item in missing)
+
+
+def test_naming_suggestions_surface_preferred_names(sample_model_json):
+    model = parse_model(sample_model_json)
+    suggestions = naming_suggestions(model)
+    assert {item["to"] for item in suggestions} >= {"beneficiary_id", "date_of_birth"}
+
+
+def test_analyze_mece_returns_expected_shape(sample_model_json):
+    analysis = analyze_mece(sample_model_json)
+    assert set(analysis.keys()) == {
+        "collisions",
+        "uncovered_terms",
+        "naming_suggestions",
+        "mece_score",
+    }
+    assert 0.0 <= analysis["mece_score"] <= 1.0

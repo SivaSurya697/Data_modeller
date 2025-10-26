@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping as MappingType
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,13 +29,13 @@ from src.models.tables import (
     ChangeSet,
     Domain,
     Entity,
+    Mapping as MappingTable,
     Relationship,
 )
 from src.services import diff_helpers
 from src.services.llm_modeler import DraftResult, ModelingService, draft_extend
 from src.services.model_analysis import classify_entity, extract_relationship_cardinality
 from src.services.model_store import load_latest_model_json
-from src.models.tables import Attribute, ChangeSet, Domain, Entity, Mapping, Relationship
 from src.services.llm_modeler import DraftResult, ModelingService
 from src.services.model_analysis import classify_entity, extract_relationship_cardinality
 from src.services.exporters.dictionary import emit_dictionary_md
@@ -63,6 +63,17 @@ def _load_domains() -> list[Domain]:
     with get_db() as session:
         domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
     return domains
+
+
+def _normalise_grain(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    return []
 
 
 def _serialize_attribute(attribute: Attribute) -> dict[str, object]:
@@ -105,8 +116,12 @@ def _build_draft_view_model(result: DraftResult) -> dict[str, object]:
     facts: list[dict[str, object]] = []
     dimensions: list[dict[str, object]] = []
     others: list[dict[str, object]] = []
+    model_entities: list[dict[str, object]] = []
 
-    for entity in sorted(result.entities, key=lambda item: item.name.lower()):
+    def _entity_sort_key(item: Any) -> str:
+        return str(getattr(item, "name", "")).lower()
+
+    for entity in sorted(result.entities, key=_entity_sort_key):
         serialized = _serialize_entity(entity)
         classification = classify_entity(entity)
         if classification == "fact":
@@ -116,7 +131,75 @@ def _build_draft_view_model(result: DraftResult) -> dict[str, object]:
         else:
             others.append(serialized)
 
+        attribute_payloads = []
+        for attribute in sorted(
+            getattr(entity, "attributes", []),
+            key=lambda item: str(getattr(item, "name", "")).lower(),
+        ):
+            name = str(getattr(attribute, "name", ""))
+            attribute_payloads.append(
+                {
+                    "id": getattr(attribute, "id", None),
+                    "name": name,
+                    "data_type": getattr(attribute, "data_type", None),
+                    "description": getattr(attribute, "description", None),
+                    "is_nullable": bool(getattr(attribute, "is_nullable", True)),
+                    "default": getattr(attribute, "default_value", getattr(attribute, "default", None)),
+                    "is_measure": bool(getattr(attribute, "is_measure", False)),
+                    "is_surrogate_key": bool(
+                        getattr(attribute, "is_surrogate_key", False)
+                    ),
+                }
+            )
+
+        role = getattr(entity, "role", None)
+        if role is not None and hasattr(role, "value"):
+            role_value = role.value
+        elif role is not None:
+            role_value = str(role)
+        else:
+            role_value = None
+
+        scd_type = getattr(entity, "scd_type", None)
+        if scd_type is not None and hasattr(scd_type, "value"):
+            scd_type_value = scd_type.value
+        elif scd_type is not None:
+            scd_type_value = str(scd_type)
+        else:
+            scd_type_value = None
+
+        model_entity = {
+            "id": getattr(entity, "id", None),
+            "name": getattr(entity, "name", None),
+            "description": getattr(entity, "description", None),
+            "documentation": getattr(entity, "documentation", None),
+            "role": role_value,
+            "grain": _normalise_grain(getattr(entity, "grain_json", None)),
+            "scd_type": scd_type_value,
+            "attributes": attribute_payloads,
+            "keys": [],
+        }
+        model_entities.append(model_entity)
+
     relationships = [_serialize_relationship(rel) for rel in result.relationships]
+
+    model_relationships = [
+        {
+            "from": rel.from_entity.name if rel.from_entity else None,
+            "to": rel.to_entity.name if rel.to_entity else None,
+            "type": rel.relationship_type,
+        }
+        for rel in result.relationships
+    ]
+
+    model_obj = getattr(result, "model", None)
+    model_payload: dict[str, Any] = {
+        "name": getattr(model_obj, "name", "Draft Model"),
+        "summary": getattr(model_obj, "summary", ""),
+        "entities": model_entities,
+    }
+    if model_relationships:
+        model_payload["relationships"] = model_relationships
 
     return {
         "model": result.model,
@@ -126,10 +209,11 @@ def _build_draft_view_model(result: DraftResult) -> dict[str, object]:
         "other_entities": others,
         "relationships": relationships,
         "impact": result.impact,
+        "model_json": json.dumps(model_payload, ensure_ascii=False),
     }
 
 
-def _infer_object_type(action: str, item: Mapping[str, Any]) -> str:
+def _infer_object_type(action: str, item: MappingType[str, Any]) -> str:
     """Return a normalised object type hint for a change item."""
 
     hint = str(item.get("object_type") or "").strip().lower()
@@ -144,14 +228,14 @@ def _infer_object_type(action: str, item: Mapping[str, Any]) -> str:
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
+    if isinstance(value, MappingType):
         return dict(value)
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             return {}
-        if isinstance(parsed, Mapping):
+        if isinstance(parsed, MappingType):
             return dict(parsed)
     return {}
 
@@ -162,8 +246,8 @@ def _extract_before_payload(
     object_type: str,
     action: str,
     target: str,
-    item: Mapping[str, Any],
-    after_json: Mapping[str, Any] | None,
+    item: MappingType[str, Any],
+    after_json: MappingType[str, Any] | None,
 ) -> dict[str, Any]:
     action_text = action.lower()
     if object_type == "entity" and ("update" in action_text or "delete" in action_text):
@@ -216,7 +300,7 @@ def extend_model() -> Any:
     """Invoke the LLM extend prompt and persist the resulting change set."""
 
     payload_raw = request.get_json(silent=True)
-    if not isinstance(payload_raw, Mapping):
+    if not isinstance(payload_raw, MappingType):
         payload_raw = {}
 
     domain_name = str(payload_raw.get("domain") or "").strip()
@@ -275,7 +359,7 @@ def extend_model() -> Any:
                 400,
             )
 
-        if not isinstance(diff_payload_raw, Mapping):
+        if not isinstance(diff_payload_raw, MappingType):
             return (
                 jsonify({"ok": False, "error": "LLM diff must be a JSON object."}),
                 400,
@@ -342,7 +426,7 @@ def extend_model() -> Any:
         sanitized_changes: list[dict[str, Any]] = []
         change_count = 0
         for entry in proposed_changes_raw:
-            if not isinstance(entry, Mapping):
+            if not isinstance(entry, MappingType):
                 continue
             action = str(entry.get("action") or "").strip()
             if not action:
@@ -384,7 +468,7 @@ def extend_model() -> Any:
         session.flush()
 
         dictionary_updates = [
-            dict(update) if isinstance(update, Mapping) else update
+            dict(update) if isinstance(update, MappingType) else update
             for update in dictionary_updates_raw
         ]
 
@@ -497,7 +581,9 @@ def publish_model() -> Any:
 
         mappings = list(
             session.execute(
-                select(Mapping).join(Entity).where(Entity.domain_id == domain.id)
+                select(MappingTable)
+                .join(Entity)
+                .where(Entity.domain_id == domain.id)
             ).scalars()
         )
         mapping_dicts = [

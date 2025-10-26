@@ -2,7 +2,6 @@
 
 from . import (  # noqa: F401
     changesets,
-    coverage,
     domains,
     exports,
     mappings,
@@ -15,7 +14,6 @@ from . import (  # noqa: F401
 
 __all__ = [
     "changesets",
-    "coverage",
     "domains",
     "exports",
     "mappings",

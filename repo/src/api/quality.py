@@ -19,7 +19,7 @@ from sqlalchemy.orm import joinedload
 
 from src.models.db import get_db
 from src.models.tables import Domain, Entity, Mapping, Relationship
-from src.services.coverage_analyzer import CoverageAnalyzer
+from src.services.coverage_analyzer import analyze_mece
 from src.services.validators import quality_summary as compute_quality_summary
 
 bp = Blueprint("quality_api", __name__)
@@ -164,8 +164,8 @@ def summary():  # pragma: no cover - exercised via integration
 def dashboard():
     """Render the quality dashboard with ontology coverage metrics."""
 
-    analyzer = CoverageAnalyzer()
     selected_domain_id = request.values.get("domain_id")
+    analysis: dict | None = None
 
     with get_db() as session:
         domains = list(session.scalars(select(Domain).order_by(Domain.name)))
@@ -175,7 +175,7 @@ def dashboard():
                 "quality_dashboard.html",
                 domains=domains,
                 selected_domain_id=None,
-                report=None,
+                analysis=None,
             )
 
         if selected_domain_id is None:
@@ -187,8 +187,27 @@ def dashboard():
             flash("Invalid domain selected for analysis.", "error")
             return redirect(url_for("quality.dashboard"))
 
+        domain = (
+            session.execute(
+                select(Domain)
+                .options(
+                    joinedload(Domain.entities).joinedload(Entity.attributes),
+                    joinedload(Domain.relationships).joinedload(Relationship.from_entity),
+                    joinedload(Domain.relationships).joinedload(Relationship.to_entity),
+                )
+                .where(Domain.id == domain_id)
+            )
+            .unique()
+            .scalar_one_or_none()
+        )
+
+        if domain is None:
+            flash("Domain not found for analysis.", "error")
+            return redirect(url_for("quality.dashboard"))
+
         try:
-            report = analyzer.analyze_domain(session, domain_id)
+            model_json = _serialise_model(domain)
+            analysis = analyze_mece(model_json)
         except ValueError as exc:
             flash(str(exc), "error")
             return redirect(url_for("quality.dashboard"))
@@ -197,7 +216,7 @@ def dashboard():
         "quality_dashboard.html",
         domains=domains,
         selected_domain_id=domain_id,
-        report=report,
+        analysis=analysis,
     )
 
 
