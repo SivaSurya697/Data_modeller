@@ -159,6 +159,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(model.api_bp)
     app.register_blueprint(relationships_bp, url_prefix="/api/relationships")
     app.register_blueprint(changesets.bp)
+    app.register_blueprint(changesets.api_bp)
     app.register_blueprint(coverage.bp)
     app.register_blueprint(quality_bp, url_prefix="/api/quality")
     app.register_blueprint(quality.ui_bp)
