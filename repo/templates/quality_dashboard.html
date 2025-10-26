@@ -17,80 +17,66 @@
         </noscript>
     </form>
 
-    {% if report %}
+    {% if analysis %}
     <div class="coverage-summary">
-        <h3>Ontology Coverage for {{ report.domain_name }}</h3>
+        <h3>MECE Coverage</h3>
+        <div class="coverage-badges">
+            <span class="badge">MECE Score: {{ (analysis.mece_score * 100)|round(1) }}%</span>
+            <span class="badge">Collisions: {{ analysis.collisions|length }}</span>
+            <span class="badge">Uncovered Terms: {{ analysis.uncovered_terms|length }}</span>
+        </div>
         <div class="coverage-grid">
             <div>
-                <h4>Entity Overlaps</h4>
-                {% if report.entity_overlaps %}
-                    <ul>
-                        {% for name in report.entity_overlaps %}
-                        <li>{{ name }}</li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No overlaps detected.</p>
-                {% endif %}
-            </div>
-            <div>
-                <h4>Attribute Overlaps</h4>
-                {% if report.attribute_overlaps %}
-                    <ul>
-                        {% for name in report.attribute_overlaps %}
-                        <li>{{ name }}</li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No overlaps detected.</p>
-                {% endif %}
-            </div>
-            <div>
-                <h4>Entity Collisions</h4>
-                {% if report.entity_collisions %}
+                <h4>Collisions</h4>
+                {% if analysis.collisions %}
                     <ul class="issues">
-                        {% for name in report.entity_collisions %}
-                        <li>{{ name }}</li>
+                        {% for item in analysis.collisions %}
+                        <li>
+                            <strong>{{ item.attribute }}</strong>
+                            <small>({{ item.entities | join(', ') }})</small>
+                        </li>
                         {% endfor %}
                     </ul>
                 {% else %}
-                    <p>No collisions found.</p>
+                    <p>No collisions detected.</p>
                 {% endif %}
             </div>
             <div>
-                <h4>Attribute Collisions</h4>
-                {% if report.attribute_collisions %}
-                    <ul class="issues">
-                        {% for name in report.attribute_collisions %}
-                        <li>{{ name }}</li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p>No collisions found.</p>
-                {% endif %}
-            </div>
-            <div>
-                <h4>Uncovered Ontology Entities</h4>
-                {% if report.uncovered_entities %}
+                <h4>Uncovered Ontology Terms</h4>
+                {% if analysis.uncovered_terms %}
                     <ul class="gaps">
-                        {% for name in report.uncovered_entities %}
-                        <li>{{ name }}</li>
+                        {% for item in analysis.uncovered_terms %}
+                        <li>
+                            <strong>{{ item.entity }}</strong>
+                            {% if item.missing_attrs %}
+                                <small>missing {{ item.missing_attrs | join(', ') }}</small>
+                            {% endif %}
+                        </li>
                         {% endfor %}
                     </ul>
                 {% else %}
-                    <p>All ontology entities are represented.</p>
+                    <p>All tracked ontology entities and attributes are covered.</p>
                 {% endif %}
             </div>
             <div>
-                <h4>Uncovered Ontology Attributes</h4>
-                {% if report.uncovered_attributes %}
-                    <ul class="gaps">
-                        {% for name in report.uncovered_attributes %}
-                        <li>{{ name }}</li>
+                <h4>Naming Suggestions</h4>
+                {% if analysis.naming_suggestions %}
+                    <table class="naming-suggestions">
+                        <thead>
+                            <tr><th>Entity</th><th>Current</th><th>Suggested</th></tr>
+                        </thead>
+                        <tbody>
+                        {% for item in analysis.naming_suggestions %}
+                            <tr>
+                                <td>{{ item.entity }}</td>
+                                <td>{{ item.from }}</td>
+                                <td>{{ item.to }}</td>
+                            </tr>
                         {% endfor %}
-                    </ul>
+                        </tbody>
+                    </table>
                 {% else %}
-                    <p>All ontology attributes are represented.</p>
+                    <p>No naming suggestions at this time.</p>
                 {% endif %}
             </div>
         </div>

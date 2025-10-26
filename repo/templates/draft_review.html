@@ -156,6 +156,78 @@
     {% endif %}
 </section>
 <section>
+    <h3>Coverage</h3>
+    <p class="muted">Assess MECE coverage using the healthcare payor ontology.</p>
+    <textarea name="model_json" hidden>{{ draft.model_json }}</textarea>
+    <div class="coverage-controls">
+        <button
+            hx-post="/api/coverage/analyze"
+            hx-include="[name=model_json]"
+            hx-target="#coverage-out"
+            hx-swap="innerHTML"
+            hx-on::after-request="
+                const target = document.getElementById('coverage-out');
+                const badges = document.getElementById('coverage-badges');
+                const suggestions = document.getElementById('coverage-suggestions');
+                if (!target) return;
+                try {
+                    const payload = JSON.parse(event.detail.xhr.responseText);
+                    const analysis = payload.analysis || payload;
+                    target.textContent = JSON.stringify(analysis, null, 2);
+                    if (badges) {
+                        const score = analysis.mece_score ?? null;
+                        const collisions = Array.isArray(analysis.collisions) ? analysis.collisions.length : 0;
+                        const uncovered = Array.isArray(analysis.uncovered_terms) ? analysis.uncovered_terms.length : 0;
+                        const scoreEl = badges.querySelector('[data-metric="score"]');
+                        const collisionsEl = badges.querySelector('[data-metric="collisions"]');
+                        const uncoveredEl = badges.querySelector('[data-metric="uncovered"]');
+                        if (scoreEl) {
+                            const percent = typeof score === 'number' ? Math.round(score * 1000) / 10 : null;
+                            scoreEl.textContent = `MECE Score: ${percent !== null ? percent + '%': '—'}`;
+                        }
+                        if (collisionsEl) {
+                            collisionsEl.textContent = `Collisions: ${collisions}`;
+                        }
+                        if (uncoveredEl) {
+                            uncoveredEl.textContent = `Uncovered Terms: ${uncovered}`;
+                        }
+                    }
+                    if (suggestions) {
+                        const rows = Array.isArray(analysis.naming_suggestions) ? analysis.naming_suggestions : [];
+                        if (!rows.length) {
+                            suggestions.innerHTML = '<tr><td colspan="3" class="muted">No naming suggestions.</td></tr>';
+                        } else {
+                            suggestions.innerHTML = rows
+                                .map((item) => `\n<tr><td>${item.entity}</td><td>${item.from}</td><td>${item.to}</td></tr>`)
+                                .join('');
+                        }
+                    }
+                } catch (error) {
+                    target.textContent = event.detail.xhr.responseText || 'Unable to parse response.';
+                }
+            "
+        >
+            Analyze MECE
+        </button>
+    </div>
+    <div class="coverage-badges" id="coverage-badges">
+        <span class="badge" data-metric="score">MECE Score: —</span>
+        <span class="badge" data-metric="collisions">Collisions: 0</span>
+        <span class="badge" data-metric="uncovered">Uncovered Terms: 0</span>
+    </div>
+    <div class="coverage-results">
+        <table class="naming-suggestions">
+            <thead>
+                <tr><th>Entity</th><th>Current</th><th>Suggested</th></tr>
+            </thead>
+            <tbody id="coverage-suggestions">
+                <tr><td colspan="3" class="muted">Run the MECE analyzer to view suggestions.</td></tr>
+            </tbody>
+        </table>
+        <pre id="coverage-out" class="muted">Coverage analysis results will appear here.</pre>
+    </div>
+</section>
+<section>
     <h3>Quality</h3>
     <p class="muted">Compute deterministic quality metrics for this domain.</p>
     <button
