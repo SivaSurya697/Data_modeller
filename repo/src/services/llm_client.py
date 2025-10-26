@@ -64,11 +64,19 @@ class LLMClient:
         return payload, amended_payload
 
     def json_chat_complete(
-        self, messages: Sequence[Mapping[str, Any]]
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> Mapping[str, Any]:
         """Return the parsed JSON payload from an arbitrary chat prompt."""
 
-        return self._parse_json_payload(self._chat_complete(messages))
+        return self._parse_json_payload(
+            self._chat_complete(
+                messages, temperature=temperature, max_tokens=max_tokens
+            )
+        )
 
     @staticmethod
     def _sanitize_response(response_text: str) -> str:
@@ -112,18 +120,27 @@ class LLMClient:
                 return parsed
         return None
 
-    def _chat_complete(self, messages: Sequence[Mapping[str, Any]]) -> str:
+    def _chat_complete(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
         if not messages:
             raise ValueError("messages must not be empty")
 
         last_exc: OpenAIError | None = None
         for attempt, delay in enumerate((1, 2, 4), start=1):
             try:
-                response = self._client.chat.completions.create(
-                    model=self._model_name,
-                    messages=list(messages),
-                    temperature=0.2,
-                )
+                request_kwargs: dict[str, Any] = {
+                    "model": self._model_name,
+                    "messages": list(messages),
+                    "temperature": temperature if temperature is not None else 0.2,
+                }
+                if max_tokens is not None:
+                    request_kwargs["max_tokens"] = max_tokens
+                response = self._client.chat.completions.create(**request_kwargs)
                 if not response.choices:
                     raise RuntimeError("OpenAI response did not include any choices")
                 message = response.choices[0].message

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Sequence, TypeVar
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.models.tables import (
     Attribute,
     DataModel,
+    Domain,
     Entity,
     EntityRole,
     SCDType,
@@ -28,11 +30,8 @@ from src.services.context_builder import (
 from src.services.impact import ImpactItem, evaluate_model_impact
 from src.services.llm_client import LLMClient
 from src.services.settings import DEFAULT_USER_ID, get_user_settings
-from src.services.validators import (
-    DraftRequest,
-    EntitySpec,
-    ModelDraftPayload,
-)
+from src.services import validators
+from src.services.validators import DraftRequest, EntitySpec, ModelDraftPayload
 from src.services.model_analysis import infer_model_version
 from pydantic import ValidationError
 
@@ -49,6 +48,62 @@ class DraftResult:
 
 
 EnumT = TypeVar("EnumT", bound=Enum)
+
+_LOGGER = logging.getLogger(__name__)
+
+SYSTEM_FRESH = """
+You are a senior healthcare payor data modeller.
+Produce a LOGICAL model with STAR/SNOWFLAKE discipline:
+- Classify each entity as "role": "fact" or "dimension" (use "other" only if unavoidable).
+- FACTS: must include "grain_json" (list of key columns) AND at least one attribute with "is_measure": true.
+- DIMENSIONS: must include "scd_type" in {"none","scd1","scd2"} AND at least one primary/natural key.
+- For every entity: include keys[], attributes[] with {name, datatype, semantic_type, required, [is_measure? bool], [is_surrogate_key? bool]}.
+- Define relationships with explicit cardinalities (one_to_many, many_to_one, one_to_one, many_to_many) and a short rule.
+- Use snake_case for all names. Do not mirror raw sources. Prefer canonical payor constructs.
+Output STRICT JSON with keys: entities, relationships, dictionary, shared_dim_refs. No prose.
+"""
+
+SYSTEM_REFINE = """
+You are a modelling reviewer. Fix ONLY metadata gaps without renaming existing fields unless required:
+- Add "grain_json" to every FACT if missing; pick keys consistent with attributes and relationships.
+- Ensure every FACT has at least one attribute with "is_measure": true (choose appropriate numeric measures).
+- Add "scd_type" to every DIMENSION if missing; prefer "scd1" unless historical tracking is evident, then "scd2".
+Return STRICT JSON: {"amended_model": <full corrected model>}. No commentary.
+"""
+
+_METADATA_ISSUE_PATTERNS: tuple[str, ...] = (
+    "must define a non-empty grain",
+    "must include at least one measure",
+    "must declare an scd type",
+)
+
+
+def _issues_are_metadata_only(issues: Sequence[str]) -> bool:
+    """Return ``True`` when all issues relate to grain, measures, or SCD metadata."""
+
+    filtered = [issue.strip() for issue in issues if isinstance(issue, str) and issue.strip()]
+    if not filtered:
+        return False
+    for issue in filtered:
+        lower_issue = issue.lower()
+        if not any(pattern in lower_issue for pattern in _METADATA_ISSUE_PATTERNS):
+            return False
+    return True
+
+
+def _build_fresh_user_prompt(context: DomainContext, instructions: str | None) -> str:
+    """Assemble the user prompt for the fresh draft pass."""
+
+    sections = context.to_prompt_sections()
+    if instructions:
+        instructions_clean = instructions.strip()
+        if instructions_clean:
+            sections.append(f"Additional instructions:\n{instructions_clean}")
+    sections.append(
+        "Task: Draft a fresh logical data model in JSON following the system instructions. "
+        "Emphasise canonical payor facts and dimensions with complete metadata."
+    )
+    return "\n\n".join(sections)
 
 
 class ModelingService:
@@ -348,6 +403,130 @@ class ModelingService:
         )
 
 
+def refine_model_for_metadata(db, user_id: int, model_json_str: str) -> str:
+    """Request a metadata-only refinement pass from the language model."""
+
+    settings = get_user_settings(db, str(user_id))
+    client = LLMClient(settings)
+    messages = [
+        {"role": "system", "content": SYSTEM_REFINE.strip()},
+        {
+            "role": "user",
+            "content": f"Original model JSON:\n{model_json_str}",
+        },
+    ]
+    payload = client.json_chat_complete(messages, temperature=0.1, max_tokens=3500)
+    amended_raw = payload.get("amended_model") if isinstance(payload, Mapping) else None
+    if isinstance(amended_raw, Mapping):
+        amended_model = dict(amended_raw)
+    elif isinstance(amended_raw, str):
+        sanitized = LLMClient._sanitize_response(amended_raw)
+        try:
+            parsed = json.loads(sanitized)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError("Refine response did not contain valid JSON") from exc
+        if not isinstance(parsed, Mapping):
+            raise RuntimeError("Refine response did not include a JSON object")
+        amended_model = dict(parsed)
+    else:
+        raise RuntimeError("Refine response missing 'amended_model'")
+
+    amended_model.setdefault("dictionary", [])
+    amended_model.setdefault("shared_dim_refs", [])
+    if "relationships" not in amended_model:
+        amended_model["relationships"] = []
+
+    amended_json = json.dumps(amended_model, ensure_ascii=False)
+    _LOGGER.info("Refine metadata payload generated length=%s", len(amended_json))
+    return amended_json
+
+
+def draft_fresh(
+    db: Session,
+    *,
+    domain_name: str,
+    user_id: int | str = DEFAULT_USER_ID,
+    instructions: str | None = None,
+) -> tuple[str, bool, dict[str, Any]]:
+    """Generate a fresh model draft and optionally trigger metadata refinement."""
+
+    if not domain_name:
+        raise ValueError("Domain name must be provided")
+
+    domain_stmt = select(Domain).where(func.lower(Domain.name) == domain_name.lower())
+    domain = db.execute(domain_stmt).scalar_one_or_none()
+    if domain is None:
+        raise ValueError(f"Domain '{domain_name}' was not found")
+
+    context = load_context(db, domain.id)
+    instructions_text = instructions if instructions is None else str(instructions)
+    user_prompt = _build_fresh_user_prompt(context, instructions_text)
+
+    user_identifier = str(user_id)
+    settings = get_user_settings(db, user_identifier)
+    client = LLMClient(settings)
+    messages = [
+        {"role": "system", "content": SYSTEM_FRESH.strip()},
+        {"role": "user", "content": user_prompt},
+    ]
+    payload_raw = client.json_chat_complete(messages, temperature=0.1, max_tokens=3500)
+    if not isinstance(payload_raw, Mapping):
+        raise RuntimeError("LLM response did not return a JSON object")
+
+    payload = dict(payload_raw)
+    payload.setdefault("entities", [])
+    payload.setdefault("relationships", [])
+    payload.setdefault("dictionary", [])
+    payload.setdefault("shared_dim_refs", [])
+
+    model_json_str = json.dumps(payload, ensure_ascii=False)
+    entity_count = len(payload.get("entities", [])) if isinstance(payload.get("entities"), list) else 0
+    _LOGGER.info(
+        "Draft fresh model generated length=%s entities=%s",
+        len(model_json_str),
+        entity_count,
+    )
+
+    context_used = {
+        "domain_id": context.domain.id,
+        "domain_name": context.domain.name,
+        "domain_description": context.domain.description,
+        "existing_entity_count": len(context.entities),
+        "existing_relationship_count": len(context.relationships),
+        "change_set_count": len(context.change_sets),
+        "instructions_supplied": bool(instructions_text and instructions_text.strip()),
+    }
+
+    validation = validators.validate_model_json(model_json_str)
+    issues = validation.get("issues", []) if isinstance(validation, Mapping) else []
+    if validation.get("ok", False):
+        return model_json_str, False, context_used
+
+    if _issues_are_metadata_only(issues):
+        try:
+            refined_json_str = refine_model_for_metadata(db, user_identifier, model_json_str)
+        except RuntimeError as exc:
+            error = RuntimeError("Draft failed after refine")
+            error.issues = list(issues)
+            error.model_json = model_json_str
+            error.autorefined = True
+            error.context_used = context_used
+            raise error from exc
+
+        refined_validation = validators.validate_model_json(refined_json_str)
+        if refined_validation.get("ok", False):
+            return refined_json_str, True, context_used
+
+        error = RuntimeError("Draft failed after refine")
+        error.issues = refined_validation.get("issues", [])
+        error.model_json = refined_json_str
+        error.autorefined = True
+        error.context_used = context_used
+        raise error
+
+    return model_json_str, False, context_used
+
+
 def draft_extend(
     session: Session,
     *,
@@ -379,5 +558,11 @@ def draft_extend(
     return json.dumps(payload)
 
 
-__all__ = ["DraftResult", "ModelingService", "draft_extend"]
+__all__ = [
+    "DraftResult",
+    "ModelingService",
+    "draft_extend",
+    "draft_fresh",
+    "refine_model_for_metadata",
+]
 
