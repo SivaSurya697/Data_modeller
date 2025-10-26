@@ -32,12 +32,11 @@ from src.models.tables import (
     Mapping as MappingTable,
     Relationship,
 )
-from src.services import diff_helpers
+from src.api.changesets import build_merge_payload
+from src.services import diff_helpers, model_merge
 from src.services.llm_modeler import DraftResult, ModelingService, draft_extend
 from src.services.model_analysis import classify_entity, extract_relationship_cardinality
 from src.services.model_store import load_latest_model_json
-from src.services.llm_modeler import DraftResult, ModelingService
-from src.services.model_analysis import classify_entity, extract_relationship_cardinality
 from src.services.exporters.dictionary import emit_dictionary_md
 from src.services.exporters.impact_md import emit_impact_md
 from src.services.exporters.model_json import bump_version_str, emit_model
@@ -57,6 +56,14 @@ def _json_error(message: str, status_code: int = 400, issues: list[str] | None =
     response = jsonify(payload)
     response.status_code = status_code
     return response
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _load_domains() -> list[Domain]:
@@ -519,15 +526,19 @@ def publish_model() -> Any:
 
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
-        return _json_error("Invalid JSON body.")
+        payload = request.form.to_dict()
+    if not isinstance(payload, dict):
+        return _json_error("Invalid request payload.")
 
     domain_name = str(payload.get("domain") or "").strip()
     if not domain_name:
         return _json_error("Domain name is required.")
 
-    model_json_str = payload.get("model_json")
-    if not isinstance(model_json_str, str) or not model_json_str.strip():
-        return _json_error("'model_json' must be a non-empty JSON string.")
+    model_json_raw = payload.get("model_json")
+    if isinstance(model_json_raw, str) and model_json_raw.strip():
+        model_json_str: str | None = model_json_raw.strip()
+    else:
+        model_json_str = None
 
     changeset_id_raw = payload.get("changeset_id")
     if changeset_id_raw is None:
@@ -538,12 +549,15 @@ def publish_model() -> Any:
         except (TypeError, ValueError):
             return _json_error("'changeset_id' must be an integer.")
 
-    force = bool(payload.get("force", False))
-    approved = bool(payload.get("approved", False))
+    if model_json_str is None and changeset_id is None:
+        return _json_error(
+            "'model_json' must be provided when no change set is supplied."
+        )
 
-    validation = validators.validate_model_json(model_json_str)
-    if not validation.get("ok", False):
-        return _json_error("Model validation failed.", issues=validation.get("issues", []))
+    force = _coerce_bool(payload.get("force", False))
+    approved = _coerce_bool(payload.get("approved", False))
+
+    merge_applied: list[str] | None = None
 
     with get_db() as session:
         domain_stmt = (
@@ -568,6 +582,45 @@ def publish_model() -> Any:
                 return _json_error("Change set not found.", status_code=404)
             if getattr(changeset, "domain_id", None) != domain.id:
                 return _json_error("Change set does not belong to the specified domain.")
+
+        if model_json_str is None:
+            if changeset is None:
+                return _json_error(
+                    "Change set must be supplied to auto-merge into a published model."
+                )
+            artifacts_dir = current_app.config.get("ARTIFACTS_DIR", "outputs")
+            baseline_json = load_latest_model_json(artifacts_dir, domain_name)
+            if baseline_json is None:
+                return _json_error(
+                    "No published model found for domain; cannot merge change set.",
+                    status_code=404,
+                )
+            proposed_changes, dictionary_updates = build_merge_payload(list(changeset.items))
+            merge_result = model_merge.apply_changes(
+                baseline_json,
+                proposed_changes,
+                dictionary_updates if dictionary_updates else None,
+            )
+            if not merge_result.get("ok", False):
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "merge_failed",
+                            "details": merge_result.get("errors", []),
+                            "applied": merge_result.get("applied", []),
+                        }
+                    ),
+                    400,
+                )
+            model_json_str = merge_result.get("model_json", "")
+            merge_applied = merge_result.get("applied", [])
+
+        validation = validators.validate_model_json(model_json_str)
+        if not validation.get("ok", False):
+            return _json_error(
+                "Model validation failed.", issues=validation.get("issues", [])
+            )
 
         relationship_dicts = [
             {
@@ -676,6 +729,8 @@ def publish_model() -> Any:
             "artifacts": artifacts,
             "quality": quality,
         }
+        if merge_applied:
+            response_payload["applied"] = merge_applied
 
     return jsonify(response_payload)
 

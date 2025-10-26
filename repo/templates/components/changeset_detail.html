@@ -21,6 +21,42 @@
         </button>
     </div>
 
+    <div class="changeset-merge">
+        <div id="cs-merge-inputs-{{ change_set.id }}" class="changeset-merge__inputs">
+            <label for="cs-merge-domain-{{ change_set.id }}">Merge domain</label>
+            <input id="cs-merge-domain-{{ change_set.id }}"
+                   name="domain"
+                   type="text"
+                   value="{{ change_set.domain.name if change_set.domain }}"
+                   placeholder="Enter domain name">
+            <input type="hidden" name="changeset_id" value="{{ change_set.id }}">
+        </div>
+        <div class="changeset-merge__buttons">
+            <button hx-post="{{ url_for('changesets_api.dryrun_changeset', change_set_id=change_set.id) }}"
+                    hx-include="#cs-merge-inputs-{{ change_set.id }}"
+                    hx-target="#cs-merge"
+                    hx-swap="innerHTML">
+                Dry-run merge
+            </button>
+            <button hx-post="{{ url_for('changesets_api.apply_changeset', change_set_id=change_set.id) }}"
+                    hx-include="#cs-merge-inputs-{{ change_set.id }}"
+                    hx-target="#cs-merge"
+                    hx-swap="innerHTML">
+                Apply (prepare publish)
+            </button>
+            <button hx-post="{{ url_for('model_api.publish_model') }}"
+                    hx-include="#cs-merge-inputs-{{ change_set.id }}"
+                    hx-target="#cs-merge"
+                    hx-swap="innerHTML">
+                Publish merged
+            </button>
+        </div>
+        <details open class="changeset-merge__output">
+            <summary>Merge output</summary>
+            <pre id="cs-merge"></pre>
+        </details>
+    </div>
+
     {% if change_set.items %}
         {% for item in change_set.items %}
             <details open>
