@@ -34,7 +34,12 @@ from src.models.tables import (
 )
 from src.api.changesets import build_merge_payload
 from src.services import diff_helpers, model_merge
-from src.services.llm_modeler import DraftResult, ModelingService, draft_extend
+from src.services.llm_modeler import (
+    DraftResult,
+    ModelingService,
+    draft_extend,
+    draft_fresh,
+)
 from src.services.model_analysis import classify_entity, extract_relationship_cardinality
 from src.services.model_store import load_latest_model_json
 from src.services.exporters.dictionary import emit_dictionary_md
@@ -43,7 +48,13 @@ from src.services.exporters.model_json import bump_version_str, emit_model
 from src.services.exporters.plantuml import emit_plantuml
 from src.services.validators import DraftRequest
 from src.services import validators
+from src.services.settings import DEFAULT_USER_ID
 from src.services.exporters.utils import prepare_artifact_path
+
+try:  # pragma: no cover - optional safety net
+    from src.services.minimums import enforce_minimums
+except Exception:  # pragma: no cover - best-effort optional import
+    enforce_minimums = None  # type: ignore[assignment]
 
 bp = Blueprint("modeler", __name__, url_prefix="/modeler")
 api_bp = Blueprint("model_api", __name__, url_prefix="/api/model")
@@ -70,6 +81,82 @@ def _load_domains() -> list[Domain]:
     with get_db() as session:
         domains = list(session.execute(select(Domain).order_by(Domain.name)).scalars())
     return domains
+
+
+@api_bp.post("/draft")
+def draft_model() -> Any:
+    """Generate a fresh logical model draft via the LLM."""
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _json_error("Invalid request payload.")
+
+    domain_name = str(payload.get("domain") or "").strip()
+    if not domain_name:
+        return _json_error("'domain' is required.")
+
+    instructions_raw = payload.get("instructions")
+    if instructions_raw is None or isinstance(instructions_raw, str):
+        instructions_text: str | None = instructions_raw
+    else:
+        try:
+            instructions_text = json.dumps(instructions_raw, ensure_ascii=False)
+        except TypeError:
+            instructions_text = str(instructions_raw)
+
+    user_id_value = payload.get("user_id", DEFAULT_USER_ID)
+    user_identifier = str(user_id_value if user_id_value is not None else DEFAULT_USER_ID)
+
+    with get_db() as session:
+        try:
+            model_json_str, autorefined, context_used = draft_fresh(
+                session,
+                domain_name=domain_name,
+                user_id=user_identifier,
+                instructions=instructions_text,
+            )
+        except ValueError as exc:
+            return _json_error(str(exc))
+        except RuntimeError as exc:
+            issues = list(getattr(exc, "issues", []))
+            failing_model = getattr(exc, "model_json", None)
+            context_used = getattr(exc, "context_used", {}) or {}
+            if enforce_minimums and failing_model:
+                try:
+                    patched_model = enforce_minimums(failing_model)
+                    qa = validators.validate_model_json(patched_model)
+                    if qa.get("ok", False):
+                        response_payload = {
+                            "model_json": patched_model,
+                            "qa": qa,
+                            "autorefined": True,
+                            "patched": True,
+                            "context_used": context_used,
+                        }
+                        return jsonify(response_payload)
+                    issues = qa.get("issues", issues)
+                    failing_model = patched_model
+                except Exception as patch_exc:  # pragma: no cover - defensive logging
+                    current_app.logger.warning(
+                        "Minimum metadata enforcement failed: %s", patch_exc
+                    )
+
+            error_payload: dict[str, Any] = {
+                "ok": False,
+                "error": "Draft failed after refine",
+            }
+            if issues:
+                error_payload["issues"] = issues
+            return jsonify(error_payload), 400
+
+    qa = validators.validate_model_json(model_json_str)
+    response_payload = {
+        "model_json": model_json_str,
+        "qa": qa,
+        "autorefined": autorefined,
+        "context_used": context_used,
+    }
+    return jsonify(response_payload)
 
 
 def _normalise_grain(value: Any) -> list[str]:
