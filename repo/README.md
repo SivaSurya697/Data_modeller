@@ -26,3 +26,17 @@ Data Modeller is a collaborative web application that helps product and analytic
 - Read the [User Guide](docs/USER_GUIDE.md) for page-by-page instructions on common tasks.
 - Consult the [Developer Guide](docs/DEVELOPERS.md) for setup, tooling, and extension patterns.
 - Explore the [Architecture overview](ARCHITECTURE.md) for component-level design details.
+
+## Smoke testing the draft endpoint
+
+Run the following loop after starting the local Flask server to ensure the autocorrection logic resolves metadata gaps:
+
+```bash
+# Force multiple drafts and check metadata issues disappear
+for i in 1 2 3; do
+  curl -s -X POST http://localhost:8000/api/model/draft \
+    -H "Content-Type: application/json" \
+    -d '{"domain":"Claims"}' \
+  | jq '{attempts: .autocorrect_attempts, ok: .qa.ok, issues: .qa.issues}'
+done
+```
